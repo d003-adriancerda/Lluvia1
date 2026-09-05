@@ -18,7 +18,7 @@ const SOUND_KEY = 'chubasco:sound';
 /* ⚠️ CLAVE DEL PROFESOR — cámbiala por la que quieras.
    Sin esta clave nadie puede abrir el panel del profesor.
    (Letras, números o guiones, sin espacios) */
-const TEACHER_PASS = 'PROFE-2025';
+const TEACHER_PASS = 'MiClave2025';
 
 const MAX_LEN    = 40;
 const COOLDOWN   = 1200;
