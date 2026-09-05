@@ -2,12 +2,13 @@
 
 /* ============================================================
    CHUBASCO · Tormenta de palabras para el aula
+   VERSIÓN 2 · MULTIUSUARIO (Firebase Firestore)
    ============================================================
    Secciones:
      1. Constantes y utilidades
      2. Toasts e iconos dinámicos
-     3. Store: persistencia + sincronización entre pestañas
-     4. Router de vistas
+     3. STORE FIREBASE: configuración, espejo de datos y escrituras
+     4. Router de vistas y estado global
      5. Fondo decorativo
      6. Configuración del profesor (crear sesión)
      7. Panel del profesor en directo
@@ -22,10 +23,8 @@
 /* ============================================================
    1 · CONSTANTES Y UTILIDADES
 ============================================================ */
-const DB_KEY  = 'chubasco:db:v1';
-const CHANNEL = 'chubasco:sync';
-const T_KEY   = 'chubasco:teacher';   // sesión del profesor (sessionStorage)
-const S_KEY   = 'chubasco:student';   // identidad del alumno  (sessionStorage)
+const T_KEY = 'chubasco:teacher';   // sesión del profesor (sessionStorage)
+const S_KEY = 'chubasco:student';   // identidad del alumno  (sessionStorage)
 
 const MAX_LEN    = 40;    // longitud máxima de una respuesta
 const COOLDOWN   = 1200;  // ms mínimo entre envíos del mismo alumno
@@ -35,7 +34,6 @@ const MAX_Q      = 10;    // preguntas por sesión
 const PALETTE = ['#FF5D3A','#0E9594','#F3A712','#2E6F95','#D1465F','#6FA540'];
 
 const $  = (sel, ctx = document) => ctx.querySelector(sel);
-const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
 
 /** Crea un elemento con clase y texto (siempre textContent → sin inyección HTML). */
 function el(tag, cls, text){
@@ -121,39 +119,159 @@ const SVG_NEXT   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const SVG_CLOUD  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 15a3.5 3.5 0 0 0 0-7 5.5 5.5 0 0 0-10.8 1.2A4 4 0 0 0 7 15h10.5z"/><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"/></svg>';
 
 /* ============================================================
-   3 · STORE: persistencia + sincronización entre pestañas
+   3 · STORE FIREBASE
    ------------------------------------------------------------
-   VERSIÓN 1 (local): localStorage como almacén compartido y
-   BroadcastChannel / evento "storage" para avisar al resto de
-   pestañas. En la V2 multiusuario esta sección se sustituye
-   por Firebase/Supabase.
+   ⚠️ CONFIGURACIÓN DE FIREBASE — PEGA AQUÍ TUS VALORES ⚠️
+   Consola de Firebase → ⚙️ Configuración del proyecto →
+   "Tus apps" → copia los valores del objeto firebaseConfig.
+   Sustituye los textos "PEGA-AQUI" (deja las comillas).
 ============================================================ */
-let db = loadDB();
+const firebaseConfig = {
+  apiKey: "AIzaSyD4z8oA77TdBu54z0vdCt7PbM011EtoNGI",
+  authDomain: "lluvia1-925b4.firebaseapp.com",
+  projectId: "lluvia1-925b4",
+  storageBucket: "lluvia1-925b4.firebasestorage.app",
+  messagingSenderId: "273174021964",
+  appId: "1:273174021964:web:899db28c7d320c47daf1e9"
+};
 
-function loadDB(){
-  try{
-    const raw = localStorage.getItem(DB_KEY);
-    if (raw) return JSON.parse(raw);
-  }catch(e){ /* almacenamiento no disponible: seguimos en memoria */ }
-  return { sessions: {} };
+/* ¿Está configurado? (evita errores confusos si aún no pegaste los valores) */
+const FIREBASE_OK = !Object.values(firebaseConfig).some(v => String(v).includes('PEGA-AQUI'));
+
+let fdb = null;
+if (FIREBASE_OK){
+  firebase.initializeApp(firebaseConfig);
+  fdb = firebase.firestore();
+  fdb.settings({ ignoreUndefinedProperties: true });
+} else {
+  setTimeout(() => toast('Falta la configuración de Firebase en app.js (líneas del inicio)', 'warn'), 800);
 }
 
-let bc = null;
-try{ bc = new BroadcastChannel(CHANNEL); }catch(e){ /* navegador sin soporte */ }
+/* --- Espejo local de la sesión (lo que pinta la interfaz) --- */
+let session   = null;   // {code,title,settings,current,ended,createdAt}
+let questions = [];     // [{id,text,status,order,responses:[]}]
+let responses = [];     // [{id,code,qid,text,key,authorId,authorName,ts}]
+let sessionStatus = 'idle';   // 'idle' | 'loading' | 'live' | 'missing'
+let unsub1 = null, unsub2 = null, unsub3 = null;
 
-function saveDB(){
-  try{ localStorage.setItem(DB_KEY, JSON.stringify(db)); }catch(e){}
-  try{ bc && bc.postMessage({ t: Date.now() }); }catch(e){}
+function stopWatching(){
+  [unsub1, unsub2, unsub3].forEach(u => { try{ u && u(); }catch(e){} });
+  unsub1 = unsub2 = unsub3 = null;
 }
 
-function onRemoteUpdate(){
-  db = loadDB();          // recarga el estado compartido
-  refreshCurrentView();   // y repinta la vista activa
+/** Reparte las respuestas dentro de sus preguntas (todo en memoria). */
+function attachResponses(){
+  questions.forEach(q => {
+    q.responses = responses
+      .filter(r => r.qid === q.id)
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  });
 }
-if (bc) bc.onmessage = onRemoteUpdate;
-window.addEventListener('storage', e => { if (e.key === DB_KEY) onRemoteUpdate(); });
 
-const getSession = code => db.sessions[code] || null;
+/** Escucha una sesión en tiempo real (3 suscripciones). */
+function watchSession(code){
+  stopWatching();
+  sessionStatus = 'loading';
+  session = null; questions = []; responses = [];
+
+  const root = fdb.collection('sessions').doc(code);
+
+  unsub1 = root.onSnapshot(snap => {
+    if (!snap.exists){ sessionStatus = 'missing'; session = null; refreshCurrentView(); return; }
+    sessionStatus = 'live';
+    session = Object.assign({ code }, snap.data());
+    refreshCurrentView();
+  }, err => {
+    console.error(err);
+    toast('Error de conexión con Firebase', 'warn');
+  });
+
+  unsub2 = root.collection('questions').orderBy('order').onSnapshot(snap => {
+    questions = snap.docs.map(d => Object.assign({ id: d.id, responses: [] }, d.data()));
+    attachResponses();
+    refreshCurrentView();
+  });
+
+  unsub3 = fdb.collection('responses').where('code', '==', code).onSnapshot(snap => {
+    responses = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    attachResponses();
+    refreshCurrentView();
+  });
+}
+
+/** Pregunta actualmente proyectada (o null mientras carga). */
+function currentQ(){
+  if (!session || !questions.length) return null;
+  const i = clamp(session.current, 0, questions.length - 1);
+  return questions[i];
+}
+
+/** Vista-foto de la sesión para exportar (CSV, PDF, PNG). */
+function sessionView(){
+  return Object.assign({}, session, { questions });
+}
+
+/* --- Operaciones de escritura --- */
+async function generateCode(){
+  const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  while (true){
+    let L = '';
+    for (let i = 0; i < 3; i++) L += LETTERS[Math.floor(Math.random() * LETTERS.length)];
+    let N = '';
+    for (let i = 0; i < 3; i++) N += Math.floor(Math.random() * 10);
+    const code = L + '-' + N;
+    const doc = await fdb.collection('sessions').doc(code).get();
+    if (!doc.exists) return code;
+  }
+}
+
+async function createSession(data){
+  const root = fdb.collection('sessions').doc(data.code);
+  const batch = fdb.batch();
+  batch.set(root, {
+    title: data.title,
+    settings: data.settings,
+    current: 0,
+    ended: false,
+    createdAt: Date.now()
+  });
+  data.questions.forEach((q, i) => {
+    batch.set(root.collection('questions').doc(q.id), { text: q.text, status: 'waiting', order: i });
+  });
+  await batch.commit();
+}
+
+const updateSession  = (code, patch)      => fdb.collection('sessions').doc(code).set(patch, { merge: true });
+const updateQuestion = (code, qid, patch) => fdb.collection('sessions').doc(code).collection('questions').doc(qid).set(patch, { merge: true });
+
+function addResponse(code, qid, r){
+  return fdb.collection('responses').add(Object.assign({ code, qid }, r));
+}
+
+/** Borra todas las respuestas de una pregunta que coincidan con una clave. */
+async function deleteResponsesByKey(code, qid, key){
+  const snap = await fdb.collection('responses').where('code', '==', code).get();
+  const batch = fdb.batch();
+  let n = 0;
+  snap.forEach(d => {
+    const r = d.data();
+    if (r.qid === qid && r.key === key){ batch.delete(d.ref); n++; }
+  });
+  if (n) await batch.commit();
+  return n;
+}
+
+/** Borra TODAS las respuestas de una pregunta (reiniciar). */
+async function clearResponses(code, qid){
+  const snap = await fdb.collection('responses').where('code', '==', code).get();
+  const batch = fdb.batch();
+  let n = 0;
+  snap.forEach(d => {
+    if (d.data().qid === qid){ batch.delete(d.ref); n++; }
+  });
+  if (n) await batch.commit();
+  return n;
+}
 
 /* ============================================================
    4 · ROUTER DE VISTAS Y ESTADO GLOBAL
@@ -165,8 +283,8 @@ let teacherCode = sessionStorage.getItem(T_KEY) || null;
 let student     = null;                       // { code, authorId, name }
 let joinCode    = null;                       // código validado en el paso 1 del join
 const liveState = { mode:'storm', sort:'freq' };
-let lastStudentSig = null;                    // firma del panel del alumno (re-render selectivo)
-let justSent    = null;                       // confirmación post-envío { text, until }
+let lastStudentSig = null;
+let justSent    = null;
 let lastSubmitTs = 0;
 
 function showView(name){
@@ -215,52 +333,43 @@ function readSetupQuestions(){
   $('#q-count').textContent = n + (n === 1 ? ' pregunta' : ' preguntas');
 });
 
- $('#setup-form').addEventListener('submit', e => {
+ $('#setup-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const questions = readSetupQuestions();
-  if (!questions.length){ toast('Escribe al menos una pregunta', 'warn'); return; }
+  if (!FIREBASE_OK){ toast('Primero configura Firebase en app.js', 'warn'); return; }
 
-  const title = ($('#setup-title').value.replace(/\s+/g, ' ').trim() || 'Actividad sin título').slice(0, 60);
+  const questionsInput = readSetupQuestions();
+  if (!questionsInput.length){ toast('Escribe al menos una pregunta', 'warn'); return; }
+
+  const title  = ($('#setup-title').value.replace(/\s+/g, ' ').trim() || 'Actividad sin título').slice(0, 60);
   const maxPer = clamp(parseInt($('#setup-max').value, 10) || 3, 1, 10);
 
-  const session = {
-    code: generateCode(),
-    title,
-    createdAt: Date.now(),
-    settings: {
-      maxPerStudent : maxPer,
-      allowRepeated : $('#setup-repeat').checked,
-      anonymous     : $('#setup-anon').checked
-    },
-    current: 0,
-    ended: false,
-    questions: questions.map(t => ({ id: uid(), text: t, status: 'waiting', responses: [] }))
+  const settings = {
+    maxPerStudent : maxPer,
+    allowRepeated : $('#setup-repeat').checked,
+    anonymous     : $('#setup-anon').checked
   };
+  const qs = questionsInput.map(t => ({ id: uid(), text: t }));
 
-  db.sessions[session.code] = session;
-  saveDB();
+  const submitBtn = $('#setup-form button[type=submit]');
+  submitBtn.disabled = true;
+  try{
+    const code = await generateCode();
+    await createSession({ code, title, settings, questions: qs });
 
-  teacherCode = session.code;
-  sessionStorage.setItem(T_KEY, teacherCode);
-  liveState.mode = 'storm';
-  showView('live');
-  renderLive();
-  toast('Sesión creada · código ' + session.code);
+    teacherCode = code;
+    sessionStorage.setItem(T_KEY, teacherCode);
+    liveState.mode = 'storm';
+    watchSession(code);
+    showView('live');
+    renderLive();
+    toast('Sesión creada · código ' + code);
+  }catch(err){
+    console.error(err);
+    toast('No se pudo crear la sesión (¿sin conexión?)', 'warn');
+  }finally{
+    submitBtn.disabled = false;
+  }
 });
-
-/** Genera un código de sesión libre, con formato LETRAS-123. */
-function generateCode(){
-  const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let code;
-  do{
-    let L = '';
-    for (let i = 0; i < 3; i++) L += LETTERS[Math.floor(Math.random() * LETTERS.length)];
-    let N = '';
-    for (let i = 0; i < 3; i++) N += Math.floor(Math.random() * 10);
-    code = L + '-' + N;
-  } while (db.sessions[code]);
-  return code;
-}
 
  $('#btn-go-setup').addEventListener('click', () => showView('setup'));
  $('#btn-setup-back').addEventListener('click', () => showView('home'));
@@ -269,23 +378,16 @@ function generateCode(){
   setTimeout(() => $('#join-code').focus(), 60);
 });
  $('#btn-leave-live').addEventListener('click', () => {
+  stopWatching();
   sessionStorage.removeItem(T_KEY);
   teacherCode = null;
+  sessionStatus = 'idle';
   showView('home');
 });
 
 /* ============================================================
    7 · PANEL DEL PROFESOR EN DIRECTO
 ============================================================ */
-
-/** Modifica la sesión del profesor, persiste y repinta. */
-function mutateLive(fn){
-  const s = getSession(teacherCode);
-  if (!s) return;
-  fn(s);
-  saveDB();
-  renderLive();
-}
 
 /** Confirmación en dos pasos para acciones destructivas. */
 function armTwoStep(btn, fn){
@@ -310,15 +412,22 @@ function armTwoStep(btn, fn){
 }
 
 function renderLive(){
-  const s = teacherCode && getSession(teacherCode);
-  if (!s){
+  if (!teacherCode) return;
+
+  if (sessionStatus === 'missing'){
+    stopWatching();
     sessionStorage.removeItem(T_KEY);
     teacherCode = null;
+    sessionStatus = 'idle';
     showView('home');
     return;
   }
-  s.current = clamp(s.current, 0, s.questions.length - 1);
-  const q = s.questions[s.current];
+  // Mientras llegan los datos de Firebase, pintamos lo que haya
+  if (sessionStatus !== 'live' || !session || !questions.length) return;
+
+  const s = session;
+  s.current = clamp(s.current, 0, questions.length - 1);
+  const q = questions[s.current];
 
   $('#live-title').textContent = s.title;
   $('#live-code-text').textContent = s.code;
@@ -332,32 +441,35 @@ function renderLive(){
   badge.textContent = { waiting:'En espera', open:'Abierta', paused:'En pausa', closed:'Cerrada' }[q.status];
 
   // Estadísticas
-  $('#stat-qnum').textContent = (s.current + 1) + '/' + s.questions.length;
+  $('#stat-qnum').textContent = (s.current + 1) + '/' + questions.length;
   $('#stat-people').textContent = new Set(q.responses.map(r => r.authorId)).size;
   animateNumber($('#stat-answers'), q.responses.length);
 
   // Navegación entre preguntas
   const nav = $('#qnav');
   nav.textContent = '';
-  s.questions.forEach((qq, i) => {
+  questions.forEach((qq, i) => {
     const b = el('button', 'qchip st-' + qq.status + (i === s.current ? ' active' : ''));
     b.type = 'button';
     b.title = qq.text;
     b.append(el('b', '', String(i + 1)));
     b.append(document.createTextNode(qq.text.length > 24 ? qq.text.slice(0, 24) + '…' : qq.text));
-    b.addEventListener('click', () => { liveState.mode = 'storm'; mutateLive(x => { x.current = i; }); });
+    b.addEventListener('click', () => {
+      liveState.mode = 'storm';
+      updateSession(teacherCode, { current: i });
+    });
     nav.append(b);
   });
 
   // Consola
   const tbtn = $('#btn-toggle-status');
-  if (q.status === 'waiting'){ tbtn.innerHTML = ICONS.play  + ' Abrir pregunta';   tbtn.disabled = false; }
-  else if (q.status === 'open'){ tbtn.innerHTML = ICONS.pause + ' Pausar';          tbtn.disabled = false; }
-  else if (q.status === 'paused'){ tbtn.innerHTML = ICONS.play  + ' Reanudar';      tbtn.disabled = false; }
+  if (q.status === 'waiting'){ tbtn.innerHTML = ICONS.play  + ' Abrir pregunta'; tbtn.disabled = false; }
+  else if (q.status === 'open'){ tbtn.innerHTML = ICONS.pause + ' Pausar';       tbtn.disabled = false; }
+  else if (q.status === 'paused'){ tbtn.innerHTML = ICONS.play  + ' Reanudar';   tbtn.disabled = false; }
   else { tbtn.innerHTML = ICONS.play + ' Pregunta cerrada'; tbtn.disabled = true; }
 
   $('#btn-close-q').disabled = (q.status === 'waiting' || q.status === 'closed');
-  $('#btn-next-q').disabled  = (s.current >= s.questions.length - 1);
+  $('#btn-next-q').disabled  = (s.current >= questions.length - 1);
   $('#btn-demo').disabled    = (q.status !== 'open');
   $('#btn-view-results').innerHTML = ICONS.chart + ' ' + (liveState.mode === 'storm' ? 'Resultados' : 'Ver tormenta');
 
@@ -388,28 +500,33 @@ function animateNumber(elm, to){
 }
 
 /* --- Acciones de la consola --- */
- $('#btn-toggle-status').addEventListener('click', () => mutateLive(s => {
-  const q = s.questions[s.current];
-  if (q.status === 'waiting' || q.status === 'paused') q.status = 'open';
-  else if (q.status === 'open') q.status = 'paused';
-}));
+ $('#btn-toggle-status').addEventListener('click', () => {
+  const q = currentQ();
+  if (!q) return;
+  let patch = null;
+  if (q.status === 'waiting' || q.status === 'paused') patch = { status: 'open' };
+  else if (q.status === 'open') patch = { status: 'paused' };
+  if (patch) updateQuestion(teacherCode, q.id, patch);
+});
 
  $('#btn-close-q').addEventListener('click', () => {
-  mutateLive(s => { s.questions[s.current].status = 'closed'; });
+  const q = currentQ();
+  if (!q) return;
+  updateQuestion(teacherCode, q.id, { status: 'closed' });
   toast('Pregunta cerrada para los alumnos');
 });
 
  $('#btn-next-q').addEventListener('click', () => {
+  if (!session) return;
   liveState.mode = 'storm';
-  mutateLive(s => { if (s.current < s.questions.length - 1) s.current++; });
+  updateSession(teacherCode, { current: session.current + 1 });
 });
 
- $('#btn-reset-q').addEventListener('click', e => armTwoStep(e.currentTarget, () => {
-  mutateLive(s => {
-    const q = s.questions[s.current];
-    q.responses = [];
-    q.status = 'waiting';
-  });
+ $('#btn-reset-q').addEventListener('click', e => armTwoStep(e.currentTarget, async () => {
+  const q = currentQ();
+  if (!q) return;
+  await clearResponses(teacherCode, q.id);
+  await updateQuestion(teacherCode, q.id, { status: 'waiting' });
   toast('Pregunta reiniciada');
 }));
 
@@ -420,22 +537,22 @@ function animateNumber(elm, to){
  $('#sort-freq').addEventListener('click',  () => { liveState.sort = 'freq';  renderLive(); });
  $('#sort-alpha').addEventListener('click', () => { liveState.sort = 'alpha'; renderLive(); });
 
- $('#btn-end').addEventListener('click', e => armTwoStep(e.currentTarget, () => {
-  mutateLive(s => {
-    s.ended = true;
-    s.questions.forEach(q => { q.status = 'closed'; });
-  });
+ $('#btn-end').addEventListener('click', e => armTwoStep(e.currentTarget, async () => {
+  const root = fdb.collection('sessions').doc(teacherCode);
+  const batch = fdb.batch();
+  questions.forEach(q => batch.update(root.collection('questions').doc(q.id), { status: 'closed' }));
+  batch.update(root, { ended: true });
+  await batch.commit();
   toast('Sesión finalizada');
 }));
 
  $('#live-code-btn').addEventListener('click', async () => {
-  const s = getSession(teacherCode);
-  if (!s) return;
+  if (!session) return;
   try{
-    await navigator.clipboard.writeText(s.code);
-    toast('Código copiado: ' + s.code);
+    await navigator.clipboard.writeText(session.code);
+    toast('Código copiado: ' + session.code);
   }catch(e){
-    toast('El código es ' + s.code);
+    toast('El código es ' + session.code);
   }
 });
 
@@ -456,7 +573,6 @@ function computeWords(q){
     g.variants.set(r.text, (g.variants.get(r.text) || 0) + 1);
   }
   const words = [...groups.values()].map(g => {
-    // Mostrar la variante más escrita (respeta mayúsculas/acentos originales)
     let text = g.key, best = 0;
     for (const [v, n] of g.variants){ if (n > best){ best = n; text = v; } }
     return { key: g.key, text, count: g.count };
@@ -507,7 +623,7 @@ function findSpot(W, H, w, h, placed){
 class WordStorm{
   constructor(container){
     this.c = container;
-    this.els = new Map();   // key → { el, inner }
+    this.els = new Map();
     this.data = [];
     this._raf = 0;
     new ResizeObserver(() => this.scheduleLayout()).observe(container);
@@ -526,7 +642,7 @@ class WordStorm{
   layout(){
     const c = this.c, W = c.clientWidth, H = c.clientHeight;
     const emptyMsg = $('#storm-empty');
-    if (!W || !H) return; // contenedor oculto
+    if (!W || !H) return;
 
     if (!this.data.length){
       this.clear();
@@ -539,7 +655,6 @@ class WordStorm{
     const shown = this.data.slice(0, MAX_UNIQUE);
     const keys = new Set(shown.map(w => w.key));
 
-    // Eliminar (con desvanecido) las palabras que ya no existen
     for (const [k, rec] of [...this.els]){
       if (!keys.has(k)){
         this.els.delete(k);
@@ -556,7 +671,6 @@ class WordStorm{
     const placed = [];
 
     shown.forEach((w, i) => {
-      // Las más frecuentes, más grandes (escala con raíz cuadrada)
       const fontSize = Math.round(minS + (maxS - minS) * Math.sqrt(w.count / maxCount));
 
       let rec = this.els.get(w.key);
@@ -565,7 +679,7 @@ class WordStorm{
         const b = el('button', 'word');
         b.type = 'button';
         const inner = el('span', 'w-in', w.text);
-        inner.style.setProperty('--fd', (Math.random() * 3).toFixed(2) + 's'); // fase de flotación
+        inner.style.setProperty('--fd', (Math.random() * 3).toFixed(2) + 's');
         b.append(inner);
         b.style.color = colorOf(w.key);
         b.addEventListener('click', () => onStormWordClick(w.key, b));
@@ -576,7 +690,6 @@ class WordStorm{
       rec.el.style.fontSize = fontSize + 'px';
       rec.inner.textContent = w.text;
 
-      // Medir y colocar sin solapes
       const bw = rec.el.offsetWidth, bh = rec.el.offsetHeight;
       const spot = findSpot(W, H, bw, bh, placed);
       rec.el.style.transform = `translate(${spot.x}px, ${spot.y}px)`;
@@ -598,15 +711,14 @@ class WordStorm{
   }
 }
 
-let storm = null; // instancia única del panel del profesor
+let storm = null;
 
 /* --- Tooltip al hacer clic en una palabra --- */
 let currentTipKey = null;
 
 function onStormWordClick(key, btnEl){
-  const s = getSession(teacherCode);
-  if (!s) return;
-  const q = s.questions[s.current];
+  const q = currentQ();
+  if (!q) return;
   const w = computeWords(q).find(x => x.key === key);
   if (!w) return;
 
@@ -618,7 +730,7 @@ function onStormWordClick(key, btnEl){
   $('#wt-word').textContent  = '“' + w.text + '”';
   $('#wt-stats').textContent = w.count + (w.count === 1 ? ' respuesta' : ' respuestas') + ' · ' + pctStr(w.pct) + ' de la clase';
   const wa = $('#wt-authors');
-  if (s.settings.anonymous){
+  if (session.settings.anonymous){
     wa.hidden = true;
   } else {
     wa.hidden = false;
@@ -627,7 +739,7 @@ function onStormWordClick(key, btnEl){
 
   const tip = $('#word-tooltip');
   tip.hidden = false;
-  tip.style.left = '0px'; tip.style.top = '0px'; // medir sin parpadeo
+  tip.style.left = '0px'; tip.style.top = '0px';
   const r = btnEl.getBoundingClientRect();
   const tw = tip.offsetWidth, th = tip.offsetHeight;
   let left = clamp(r.left + r.width / 2 - tw / 2, 10, innerWidth - tw - 10);
@@ -642,15 +754,13 @@ function hideWordTooltip(){
   $('#word-tooltip').hidden = true;
 }
 
- $('#wt-delete').addEventListener('click', () => {
+ $('#wt-delete').addEventListener('click', async () => {
   if (!currentTipKey) return;
-  const s = getSession(teacherCode);
-  const q = s.questions[s.current];
+  const q = currentQ();
   const key = currentTipKey;
   const n = q.responses.filter(r => r.key === key).length;
-  q.responses = q.responses.filter(r => r.key !== key);
   hideWordTooltip();
-  saveDB(); renderLive();
+  await deleteResponsesByKey(teacherCode, q.id, key);
   toast('Respuesta eliminada (' + n + ' apariciones)');
 });
 
@@ -664,7 +774,7 @@ document.addEventListener('pointerdown', e => {
    9 · RESULTADOS, CSV E IMPRESIÓN
 ============================================================ */
 function renderResults(s, q){
-  $('#res-q-tag').textContent = '· ' + (s.current + 1) + '/' + s.questions.length;
+  $('#res-q-tag').textContent = '· ' + (s.current + 1) + '/' + questions.length;
 
   const words = computeWords(q);
   const people = new Set(q.responses.map(r => r.authorId)).size;
@@ -729,13 +839,11 @@ function renderResults(s, q){
   if (!btn) return;
   const key = btn.dataset.key;
   if (btn.dataset.armed){
-    const s = getSession(teacherCode);
-    const q = s.questions[s.current];
+    const q = currentQ();
     const n = q.responses.filter(r => r.key === key).length;
-    q.responses = q.responses.filter(r => r.key !== key);
     hideWordTooltip();
-    saveDB(); renderLive();
-    toast('Respuesta eliminada (' + n + ' apariciones)');
+    deleteResponsesByKey(teacherCode, q.id, key)
+      .then(() => toast('Respuesta eliminada (' + n + ' apariciones)'));
   } else {
     btn.dataset.armed = '1';
     btn.classList.add('armed');
@@ -748,14 +856,13 @@ function renderResults(s, q){
 const csvEscape = v => '"' + String(v).replace(/"/g, '""') + '"';
 
  $('#btn-export').addEventListener('click', () => {
-  const s = getSession(teacherCode);
-  if (!s) return;
+  if (!session) return;
+  const s = sessionView();
   const rows = [['Pregunta','Respuesta','Frecuencia','Porcentaje']];
   s.questions.forEach(q => {
     computeWords(q).forEach(w =>
       rows.push([q.text, w.text, String(w.count), pctStr(w.pct)]));
   });
-  // BOM + separador ";" para que Excel en español lo abra en columnas
   const csv = '\uFEFF' + rows.map(r => r.map(csvEscape).join(';')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const a = el('a');
@@ -770,9 +877,8 @@ const csvEscape = v => '"' + String(v).replace(/"/g, '""') + '"';
 
 /* --- Impresión / PDF con todas las preguntas --- */
  $('#btn-print').addEventListener('click', () => {
-  const s = getSession(teacherCode);
-  if (!s) return;
-  buildPrintArea(s);
+  if (!session) return;
+  buildPrintArea(sessionView());
   window.print();
 });
 window.addEventListener('afterprint', () => { $('#print-area').textContent = ''; });
@@ -820,21 +926,30 @@ function showJoinError(msg){
   err.hidden = false;
 }
 
-/** Valida un código de sesión y continúa el acceso (paso 1 del join). */
-function tryJoinCode(raw){
+/** Valida un código contra Firebase y continúa el acceso. */
+async function tryJoinCode(raw){
+  if (!FIREBASE_OK){ showJoinError('La app aún no está configurada (falta Firebase).'); return; }
   const m = String(raw || '').toUpperCase().replace(/\s+/g, '').match(/^([A-Z]{3})-?(\d{3})$/);
   if (!m){ showJoinError('El código tiene el formato ABC-123.'); return; }
   const code = m[1] + '-' + m[2];
-  const s = getSession(code);
-  if (!s)      { showJoinError('No encuentro ninguna sesión con ese código.'); return; }
-  if (s.ended) { showJoinError('Esta sesión ya ha finalizado.'); return; }
-  joinCode = code;
-  if (s.settings.anonymous){
-    finishJoin(null);
-  } else {
-    $('#join-step1').hidden = true;
-    $('#join-step2').hidden = false;
-    $('#join-name').focus();
+
+  try{
+    const doc = await fdb.collection('sessions').doc(code).get();
+    if (!doc.exists){ showJoinError('No encuentro ninguna sesión con ese código.'); return; }
+    const data = doc.data();
+    if (data.ended){ showJoinError('Esta sesión ya ha finalizado.'); return; }
+
+    joinCode = code;
+    if (data.settings.anonymous){
+      finishJoin(null);
+    } else {
+      $('#join-step1').hidden = true;
+      $('#join-step2').hidden = false;
+      $('#join-name').focus();
+    }
+  }catch(err){
+    console.error(err);
+    showJoinError('Sin conexión. Comprueba tu internet e inténtalo de nuevo.');
   }
 }
 
@@ -863,6 +978,10 @@ function finishJoin(name){
   sessionStorage.setItem(S_KEY, JSON.stringify(student));
   lastStudentSig = null;
   justSent = null;
+  // Si aún no estamos escuchando esa sesión, empezamos ahora
+  if (sessionStatus === 'idle' || sessionStatus === 'missing' || (session && session.code !== joinCode)){
+    watchSession(joinCode);
+  }
   showView('student');
   renderStudent();
 }
@@ -870,13 +989,13 @@ function finishJoin(name){
  $('#btn-join-back').addEventListener('click', resetJoin);
  $('#btn-join-home').addEventListener('click', () => showView('home'));
  $('#btn-student-leave').addEventListener('click', () => {
+  stopWatching();
   student = null;
+  sessionStatus = 'idle';
   sessionStorage.removeItem(S_KEY);
   showView('join');
   resetJoin();
 });
-
-const getStudentSession = () => (student ? getSession(student.code) : null);
 
 function messageZone(icon, title, sub){
   const box = el('div', 'zone-msg');
@@ -900,24 +1019,33 @@ function appendMyWords(z, mine){
 }
 
 /**
- * Renderizado selectivo: solo reconstruye el panel del alumno
- * cuando cambia la pregunta, su estado o sus respuestas. Así,
- * las sincronizaciones entrantes nunca borran lo que está escribiendo.
+ * Renderizado selectivo del panel del alumno: solo reconstruye
+ * cuando cambia la pregunta, su estado o sus respuestas.
  */
 function renderStudent(){
   if (!student) return;
-  const s = getStudentSession();
 
-  if (!s){
+  // Mientras Firebase responde...
+  if (sessionStatus === 'missing' || (session && session.code !== student.code)){
     lastStudentSig = null;
     const z = $('#student-zone');
     z.textContent = '';
-    z.append(messageZone(SVG_CLOUD, 'Esa sesión ya no existe en este navegador',
-      'Quizá se creó en otro dispositivo. En la versión multiusuario esto no pasará.'));
+    z.append(messageZone(SVG_CLOUD, 'Esa sesión ya no existe',
+      'Puede que el profesor la haya cerrado o borrado.'));
     $('#student-meta').textContent = '';
     return;
   }
+  if (sessionStatus !== 'live' || !session || !questions.length){
+    if (lastStudentSig !== 'loading'){
+      lastStudentSig = 'loading';
+      const z = $('#student-zone');
+      z.textContent = '';
+      z.append(messageZone(SVG_CLOCK, 'Conectando con la clase…', 'Un momento, por favor.'));
+    }
+    return;
+  }
 
+  const s = session;
   $('#student-code').textContent = s.code;
   $('#student-title').textContent = s.title;
 
@@ -925,14 +1053,13 @@ function renderStudent(){
   if (s.ended){
     meta.textContent = 'Puedes cerrar esta página. ¡Gracias por participar!';
   } else {
-    const total = s.questions.reduce((n, q) => n + q.responses.length, 0);
-    meta.textContent = 'La clase lleva ' + total + (total === 1 ? ' respuesta' : ' respuestas');
+    meta.textContent = 'La clase lleva ' + responses.length +
+      (responses.length === 1 ? ' respuesta' : ' respuestas');
   }
 
   if (s.ended){
-    const sig = 'ended';
-    if (sig !== lastStudentSig){
-      lastStudentSig = sig;
+    if (lastStudentSig !== 'ended'){
+      lastStudentSig = 'ended';
       const z = $('#student-zone');
       z.textContent = '';
       z.append(messageZone(SVG_CLOUD, 'La sesión ha finalizado', '¡Gracias por participar en la tormenta de palabras!'));
@@ -940,13 +1067,13 @@ function renderStudent(){
     return;
   }
 
-  const q = s.questions[s.current];
+  const q = questions[clamp(s.current, 0, questions.length - 1)];
   const mine = q.responses.filter(r => r.authorId === student.authorId);
   const remaining = s.settings.maxPerStudent - mine.length;
   const showingSent = justSent && justSent.until > Date.now();
 
   const sig = [q.id, q.status, mine.length, showingSent ? justSent.text : ''].join('|');
-  if (sig === lastStudentSig) return; // nada relevante ha cambiado
+  if (sig === lastStudentSig) return;
   lastStudentSig = sig;
 
   const z = $('#student-zone');
@@ -1008,7 +1135,6 @@ function renderStudent(){
 
   const note = el('p', 'remaining-note');
   const cc = el('span');
-  cc.id = 'char-count';
   cc.textContent = '0/' + MAX_LEN;
   note.append(cc, document.createTextNode(' · te quedan ' + remaining + (remaining === 1 ? ' respuesta' : ' respuestas')));
   z.append(note);
@@ -1021,38 +1147,50 @@ function renderStudent(){
 }
 
 function submitStudentAnswer(raw){
-  const s = getStudentSession();
-  if (!s || s.ended) return;
-  const q = s.questions[s.current];
+  if (!session) return;
+  if (session.ended) return;
+  const q = questions[clamp(session.current, 0, questions.length - 1)];
   if (q.status !== 'open'){ toast('La pregunta no está abierta', 'warn'); return; }
 
   const now = Date.now();
   if (now - lastSubmitTs < COOLDOWN){ toast('Un momento, no tan rápido', 'warn'); return; }
 
   const mine = q.responses.filter(r => r.authorId === student.authorId);
-  if (mine.length >= s.settings.maxPerStudent){ toast('Ya has usado todas tus respuestas', 'warn'); return; }
+  if (mine.length >= session.settings.maxPerStudent){ toast('Ya has usado todas tus respuestas', 'warn'); return; }
 
   const text = sanitizeAnswer(raw);
   const key = text ? normalizeKey(text) : null;
   if (!text || !key){ toast('Esa respuesta no es válida', 'warn'); return; }
 
-  if (!s.settings.allowRepeated && mine.some(r => r.key === key)){
+  if (!session.settings.allowRepeated && mine.some(r => r.key === key)){
     toast('Ya enviaste esa misma palabra', 'warn');
     return;
   }
 
   lastSubmitTs = now;
-  q.responses.push({ id: uid(), text, key, authorId: student.authorId, authorName: student.name, ts: now });
   justSent = { text, until: now + 1900 };
-  saveDB();
-  renderStudent();
-  setTimeout(renderStudent, 1950); // vuelve al formulario tras la confirmación
+  renderStudent(); // confirmación inmediata
+
+  addResponse(session.code, q.id, {
+    text, key,
+    authorId: student.authorId,
+    authorName: student.name,
+    ts: now
+  }).then(() => {
+    setTimeout(renderStudent, 1950); // vuelve al formulario tras la confirmación
+  }).catch(err => {
+    console.error(err);
+    justSent = null;
+    lastStudentSig = null;
+    renderStudent();
+    toast('No se pudo enviar (¿sin conexión?)', 'warn');
+  });
 }
 
 /* ============================================================
    11 · LLUVIA DE DEMOSTRACIÓN
-   Simula respuestas de alumnos para poder probar la tormenta
-   en solitario, viendo las palabras caer una a una.
+   Simula respuestas que llegan por Firebase (se ven en todos
+   los dispositivos conectados a la sesión).
 ============================================================ */
 const DEMO_POOL = [
   'motivación','curiosidad','curiosidad','proyectos','práctica','práctica','ejemplos','compañeros',
@@ -1063,9 +1201,8 @@ const DEMO_POOL = [
 let demoAuthors = null;
 
  $('#btn-demo').addEventListener('click', () => {
-  const s = getSession(teacherCode);
-  if (!s) return;
-  const q = s.questions[s.current];
+  const q = currentQ();
+  if (!q) return;
   if (q.status !== 'open'){ toast('Abre la pregunta antes de lanzar la lluvia demo', 'warn'); return; }
   if (!demoAuthors) demoAuthors = Array.from({ length: 12 }, () => uid());
 
@@ -1075,10 +1212,10 @@ let demoAuthors = null;
       const text = DEMO_POOL[Math.floor(Math.random() * DEMO_POOL.length)];
       const key = normalizeKey(text);
       const authorId = demoAuthors[Math.floor(Math.random() * demoAuthors.length)];
-      if (!s.settings.allowRepeated && q.responses.some(r => r.authorId === authorId && r.key === key)) return;
-      q.responses.push({ id: uid(), text, key, authorId, authorName: null, ts: Date.now(), demo: true });
-      saveDB();
-      renderLive();
+      if (!session || !session.settings.allowRepeated &&
+          q.responses.some(r => r.authorId === authorId && r.key === key)) return;
+      addResponse(session.code, q.id, { text, key, authorId, authorName: null, ts: Date.now(), demo: true })
+        .catch(err => console.error(err));
     }, i * 230);
   }
   toast('Lluvia de demostración en camino…');
@@ -1096,18 +1233,16 @@ function buildJoinURL(code){
 }
 
 function openQrOverlay(){
-  const s = getSession(teacherCode);
-  if (!s) return;
-  const url = buildJoinURL(s.code);
+  if (!session) return;
+  const url = buildJoinURL(session.code);
 
-  $('#qr-code-text').textContent = s.code;
+  $('#qr-code-text').textContent = session.code;
   $('#qr-url-text').textContent = url;
 
   const box = $('#qr-box');
   box.textContent = '';
   if (typeof QRCode === 'undefined'){
-    // Sin conexión al CDN: mostramos el código en grande igualmente
-    box.append(el('p', 'qr-fallback', s.code));
+    box.append(el('p', 'qr-fallback', session.code));
     toast('No se pudo generar el QR (sin conexión). Proyecta el código.', 'warn');
   } else {
     new QRCode(box, {
@@ -1127,33 +1262,29 @@ function closeQrOverlay(){ $('#qr-overlay').hidden = true; }
  $('#qr-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeQrOverlay(); });
 
  $('#qr-copy-link').addEventListener('click', async () => {
-  const s = getSession(teacherCode);
-  if (!s) return;
+  if (!session) return;
   try{
-    await navigator.clipboard.writeText(buildJoinURL(s.code));
+    await navigator.clipboard.writeText(buildJoinURL(session.code));
     toast('Enlace copiado');
-  }catch(e){ toast(buildJoinURL(s.code)); }
+  }catch(e){ toast(buildJoinURL(session.code)); }
 });
 
 /* ---------- Modo proyector ---------- */
 
 function enterProjector(){
-  if (!getSession(teacherCode)) return;
-  liveState.mode = 'storm';   // en proyector se muestra la tormenta
+  if (!session) return;
+  liveState.mode = 'storm';
   renderLive();
   document.body.classList.add('projector');
-  // Pantalla completa real si el navegador lo permite (oculta su interfaz)
   const stage = $('.stage');
   if (stage.requestFullscreen)       stage.requestFullscreen().catch(() => {});
   else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
-  // Si el navegador no soporta fullscreen (algunos iPad), el modo
-  // CSS "body.projector" ya ocupa toda la pantalla de todos modos.
 }
 
 function exitProjector(){
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
   document.body.classList.remove('projector');
-  renderLive(); // recoloca la tormenta a su tamaño normal
+  renderLive();
 }
 
  $('#btn-projector').addEventListener('click', enterProjector);
@@ -1171,7 +1302,6 @@ document.addEventListener('keydown', e => {
 
 /* ---------- Exportar la nube como PNG ---------- */
 
-/** Dibuja texto con ajuste de línea manual (fillText no parte líneas). */
 function wrapCanvasText(ctx, text, x, y, maxW, lh){
   let line = '';
   for (const w of String(text).split(' ')){
@@ -1183,46 +1313,33 @@ function wrapCanvasText(ctx, text, x, y, maxW, lh){
 }
 
  $('#btn-export-png').addEventListener('click', () => {
-  const s = getSession(teacherCode);
-  if (!s) return;
-  const q = s.questions[s.current];
+  const q = currentQ();
+  if (!q) return;
   const words = computeWords(q);
   if (!words.length){ toast('Todavía no hay respuestas que exportar', 'warn'); return; }
   toast('Generando imagen de la nube…');
-  // Esperamos a que las tipografías estén cargadas para que el canvas
-  // use Fraunces/Space Grotesk y no una fuente de sustitución.
   const fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
-  fontsReady.then(() => exportStormPNG(s, q, words));
+  fontsReady.then(() => exportStormPNG(sessionView(), q, words));
 });
 
-/**
- * Dibuja la tormenta actual en un lienzo de 1600×900 (formato
- * proyector) reutilizando el mismo algoritmo de colocación que la
- * nube en vivo, y la descarga como PNG. La cabecera y el pie quedan
- * "reservados" para que las palabras no los pisen.
- */
 function exportStormPNG(s, q, words){
   const W = 1600, H = 900;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // Fondo papel con textura de puntos (misma estética que la app)
   ctx.fillStyle = '#FCFAF4';
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = 'rgba(35,32,26,.055)';
   for (let y = 24; y < H; y += 22)
     for (let x = 24; x < W; x += 22) ctx.fillRect(x, y, 2, 2);
 
-  // Zonas reservadas: cabecera y pie (las palabras las esquivan)
   const HEAD_H = 175, FOOT_H = 75;
   const placed = [
     { x: 0, y: 0, w: W, h: HEAD_H },
     { x: 0, y: H - FOOT_H, w: W, h: FOOT_H }
   ];
 
-  // Palabras: misma proporción frecuencia→tamaño que en vivo,
-  // pero a escala de póster. Máximo 70 para que respire.
   const shown = words.slice(0, 70);
   const maxCount = Math.max(...shown.map(w => w.count));
   const minS = 30, maxS = 118;
@@ -1239,7 +1356,6 @@ function exportStormPNG(s, q, words){
     ctx.fillText(w.text, spot.x, spot.y + (th - fontSize) / 2);
   });
 
-  // Cabecera: gota + marca + pregunta
   const drop = new Path2D('M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z');
   ctx.save();
   ctx.translate(50, 36); ctx.scale(2.4, 2.4);
@@ -1254,7 +1370,6 @@ function exportStormPNG(s, q, words){
   ctx.font = '600 36px "Fraunces", Georgia, serif';
   wrapCanvasText(ctx, q.text, 50, 102, W - 100, 46);
 
-  // Pie con los datos de la sesión
   const people = new Set(q.responses.map(r => r.authorId)).size;
   ctx.font = '500 22px "Space Grotesk", "Segoe UI", sans-serif';
   ctx.fillStyle = '#6B6455';
@@ -1264,7 +1379,6 @@ function exportStormPNG(s, q, words){
     people + ' participantes  ·  ' + new Date().toLocaleDateString('es-ES'),
     50, H - 48);
 
-  // Descarga
   canvas.toBlob(blob => {
     const a = el('a');
     a.href = URL.createObjectURL(blob);
@@ -1281,23 +1395,15 @@ function exportStormPNG(s, q, words){
 (function init(){
   buildBackgroundWords();
 
-  // Limpieza: sesiones de más de 7 días
-  const week = Date.now() - 7 * 24 * 3600 * 1000;
-  let pruned = false;
-  for (const [c, s] of Object.entries(db.sessions)){
-    if (s.createdAt < week){ delete db.sessions[c]; pruned = true; }
-  }
-  if (pruned) saveDB();
-
-  // Reanudar al alumno si refresca la página
+  // ¿Era alumno? → reanudar (sirve al recargar la página)
   try{
     const raw = sessionStorage.getItem(S_KEY);
-    if (raw){
+    if (raw && FIREBASE_OK){
       const st = JSON.parse(raw);
-      const ses = st && db.sessions[st.code];
-      if (ses && !ses.ended){
+      if (st && st.code){
         student = st;
         lastStudentSig = null;
+        watchSession(st.code);
         showView('student');
         renderStudent();
         return;
@@ -1305,8 +1411,9 @@ function exportStormPNG(s, q, words){
     }
   }catch(e){}
 
-  // Reanudar al profesor si refresca la página
-  if (teacherCode && getSession(teacherCode)){
+  // ¿Era profesor? → reanudar
+  if (teacherCode && FIREBASE_OK){
+    watchSession(teacherCode);
     showView('live');
     renderLive();
     return;
