@@ -1,7 +1,7 @@
 'use strict';
 
 /* ============================================================
-   CHUBASCO · Tormenta de palabras para el aula
+   ACnimbus · Tormenta de palabras para el aula
    VERSIÓN FINAL + música de fondo + crecimiento animado
    ============================================================ */
 
@@ -1687,7 +1687,7 @@ const csvEscape = v => '"' + String(v).replace(/"/g, '""') + '"';
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const a = el('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'chubasco-' + s.code + '-resultados.csv';
+  a.download = 'ACnimbus-' + s.code + '-resultados.csv';
   document.body.append(a);
   a.click();
   a.remove();
@@ -1705,7 +1705,7 @@ window.addEventListener('afterprint', () => { $('#print-area').textContent = '';
 
 function buildPrintArea(s){
   let html = '<h1 class="pa-title">' + escHTML(s.title) + '</h1>'
-    + '<p class="pa-meta">Chubasco · código de sesión ' + escHTML(s.code)
+    + '<p class="pa-meta">ACnimbus · código de sesión ' + escHTML(s.code)
     + ' · ' + new Date().toLocaleString('es-ES') + '</p>';
 
   s.questions.forEach((q, i) => {
@@ -2268,7 +2268,7 @@ function exportStormPNG(s, q, words){
 
   ctx.fillStyle = '#23201A';
   ctx.font = '700 30px "Fraunces", Georgia, serif';
-  ctx.fillText('Chubasco', 122, 44);
+  ctx.fillText('ACnimbus', 122, 44);
 
   ctx.font = '600 36px "Fraunces", Georgia, serif';
   wrapCanvasText(ctx, q.text, 50, 102, W - 100, 46);
@@ -2285,7 +2285,7 @@ function exportStormPNG(s, q, words){
   canvas.toBlob(blob => {
     const a = el('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'chubasco-' + s.code + '-nube.png';
+    a.download = 'ACnimbus-' + s.code + '-nube.png';
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     toast('Imagen PNG descargada');
