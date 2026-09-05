@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Lluvia1 · Tormenta de palabras para el aula</title>
+  <title>Chubasco · Tormenta de palabras para el aula</title>
   <meta name="description" content="Lanza una pregunta a tu clase y convierte las respuestas en una tormenta de palabras en directo.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z' fill='%23FF5D3A' stroke='%2322201B' stroke-width='1.5'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +23,7 @@
       <header class="home-hero">
         <p class="brand">
           <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-          Lluvia1
+          Chubasco
         </p>
         <h1>Que llueva la<br><em>palabra</em> correcta.</h1>
         <p class="lede">
@@ -45,6 +45,12 @@
           <strong>Versión multiusuario:</strong> las respuestas llegan en directo desde
           cualquier dispositivo. Los alumnos entran con el código de sesión o escaneando el QR.
         </p>
+
+        <!-- Historial de sesiones del profesor -->
+        <div id="history-box" class="history-box" hidden>
+          <h3 class="history-title">Mis sesiones anteriores</h3>
+          <div id="history-list" class="history-list"></div>
+        </div>
       </header>
     </section>
 
@@ -91,6 +97,11 @@
                 <p class="field-hint">Si se activa, no se pedirá el nombre al entrar.</p>
               </div>
               <label class="switch"><input type="checkbox" id="setup-anon" checked><span class="track"></span></label>
+            </div>
+            <div class="rule-block">
+              <label for="setup-blocked">Palabras bloqueadas <small>(opcional)</small></label>
+              <textarea id="setup-blocked" rows="2" placeholder="Una por línea. Si una respuesta contiene alguna de estas palabras, no se aceptará."></textarea>
+              <p class="field-hint">No distingue mayúsculas ni tildes. Útil para evitar impropiedades.</p>
             </div>
           </fieldset>
 
@@ -154,6 +165,17 @@
             </div>
           </div>
           <p class="res-summary" id="res-summary"></p>
+
+          <!-- Gráficos estadísticos -->
+          <div class="charts-row no-print">
+            <div class="seg" role="group" aria-label="Tipo de gráfico">
+              <button id="chart-bars" class="seg-btn active" type="button">Barras</button>
+              <button id="chart-dots" class="seg-btn" type="button">Puntos</button>
+              <button id="chart-donut" class="seg-btn" type="button">Pastel</button>
+            </div>
+          </div>
+          <div id="chart-area" class="chart-area"></div>
+
           <div class="res-scroll">
             <table class="res-table">
               <thead>
