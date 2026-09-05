@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Chubasco · Tormenta de palabras para el aula</title>
   <meta name="description" content="Lanza una pregunta a tu clase y convierte las respuestas en una tormenta de palabras en directo.">
+  <script>
+    /* Aplica el tema guardado antes de pintar, para evitar destello */
+    try{
+      var t = localStorage.getItem('chubasco:theme');
+      if(!t) t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+      document.documentElement.dataset.theme = t;
+    }catch(e){}
+  </script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z' fill='%23FF5D3A' stroke='%2322201B' stroke-width='1.5'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,6 +20,9 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-view="home">
+
+  <!-- Lluvia ambiental de fondo (canvas, se dibuja con JS) -->
+  <canvas id="rain" aria-hidden="true"></canvas>
 
   <!-- Palabras decorativas de fondo (se generan con JS) -->
   <div id="bg-words" aria-hidden="true"></div>
@@ -25,7 +36,7 @@
           <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           Chubasco
         </p>
-        <h1>Que llueva la<br><em>palabra</em> correcta.</h1>
+        <h1>La clase<br><em>opina</em>.</h1>
         <p class="lede">
           Lanza una pregunta a tu clase, recoge las respuestas en directo y conviértelas
           en una tormenta de palabras que todo el aula puede leer.
@@ -73,9 +84,9 @@
 
           <fieldset>
             <legend><span class="step-num">02</span> Preguntas <span class="legend-hint" id="q-count">0 preguntas</span></legend>
-            <textarea id="setup-questions" rows="4" maxlength="600"
-              placeholder="Escribe una pregunta por línea:&#10;¿Qué palabra relacionas con una buena experiencia de aprendizaje?&#10;¿Qué esperas aprender en esta asignatura?&#10;¿Qué estrategia te ayuda más a aprender?"></textarea>
-            <p class="field-hint">Una pregunta por línea. Máximo 10 preguntas.</p>
+            <div id="qcards"></div>
+            <button id="btn-add-q" type="button" class="btn btn-ghost btn-sm" style="margin-top:10px">+ Añadir pregunta</button>
+            <p class="field-hint">Máximo 10 preguntas. Elige el tipo de cada una: palabra libre o escala del 1 al 5.</p>
           </fieldset>
 
           <fieldset>
@@ -132,6 +143,11 @@
           QR
         </button>
 
+        <button id="btn-sound" class="btn btn-ghost btn-icon" title="Sonido de gotas"></button>
+        <button id="btn-theme-live" class="btn btn-ghost btn-icon" title="Modo claro / oscuro">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+        </button>
+
         <span id="live-status-badge" class="status-badge st-waiting">En espera</span>
         <button id="btn-leave-live" class="btn btn-ghost btn-sm">Salir</button>
       </header>
@@ -168,7 +184,7 @@
 
           <!-- Gráficos estadísticos -->
           <div class="charts-row no-print">
-            <div class="seg" role="group" aria-label="Tipo de gráfico">
+            <div class="seg" id="chart-seg" role="group" aria-label="Tipo de gráfico">
               <button id="chart-bars" class="seg-btn active" type="button">Barras</button>
               <button id="chart-dots" class="seg-btn" type="button">Puntos</button>
               <button id="chart-donut" class="seg-btn" type="button">Pastel</button>
@@ -179,7 +195,7 @@
           <div class="res-scroll">
             <table class="res-table">
               <thead>
-                <tr><th>#</th><th>Respuesta</th><th class="num">Frec.</th><th class="num">%</th><th class="bar-cell"></th><th></th></tr>
+                <tr><th>#</th><th>Respuesta</th><th class="num">Frec.</th><th class="num">%</th><th class="num">Votos</th><th class="bar-cell"></th><th></th></tr>
               </thead>
               <tbody id="res-body"></tbody>
             </table>
@@ -218,6 +234,10 @@
         <button id="btn-demo" class="btn btn-demo btn-sm">
           <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
           Lluvia demo
+        </button>
+        <button id="btn-vote" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 14.9 8.6 21.5 9.5 16.7 14.1 17.9 20.7 12 17.6 6.1 20.7 7.3 14.1 2.5 9.5 9.1 8.6z"/></svg>
+          Votación
         </button>
         <button id="btn-projector" class="btn btn-ghost btn-sm">
           <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
@@ -284,6 +304,11 @@
     </section>
 
   </div>
+
+  <!-- Botón de tema para las vistas fuera del panel (en el panel hay uno en la cabecera) -->
+  <button id="theme-toggle" class="btn btn-ghost btn-icon theme-toggle" title="Modo claro / oscuro" aria-label="Cambiar tema">
+    <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+  </button>
 
   <!-- Tooltip al hacer clic en una palabra de la tormenta -->
   <div id="word-tooltip" role="status" hidden>
