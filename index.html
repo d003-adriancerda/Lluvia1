@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Chubasco · Tormenta de palabras para el aula</title>
+  <meta name="description" content="Lanza una pregunta a tu clase y convierte las respuestas en una tormenta de palabras en directo.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z' fill='%23FF5D3A' stroke='%2322201B' stroke-width='1.5'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-view="home">
+
+  <!-- Palabras decorativas de fondo (se generan con JS) -->
+  <div id="bg-words" aria-hidden="true"></div>
+
+  <div class="app">
+
+    <!-- ════════════════ VISTA: INICIO ════════════════ -->
+    <section id="view-home" class="view view-home">
+      <header class="home-hero">
+        <p class="brand">
+          <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          Chubasco
+        </p>
+        <h1>Que llueva la<br><em>palabra</em> correcta.</h1>
+        <p class="lede">
+          Lanza una pregunta a tu clase, recoge las respuestas en directo y conviértelas
+          en una tormenta de palabras que todo el aula puede leer.
+          Sin registros ni instalaciones: solo hace falta un código.
+        </p>
+        <div class="home-actions">
+          <button id="btn-go-setup" class="btn btn-ink btn-lg">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+            Dar la clase · Panel del profesor
+          </button>
+          <button id="btn-go-join" class="btn btn-ghost btn-lg">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7z"/></svg>
+            Entrar como alumno
+          </button>
+        </div>
+        <p class="home-note">
+          <strong>Versión demo local:</strong> todo se guarda en este navegador.
+          Para simular varios alumnos, abre la aplicación en varias pestañas.
+        </p>
+      </header>
+    </section>
+
+    <!-- ════════════════ VISTA: CONFIGURACIÓN DEL PROFESOR ════════════════ -->
+    <section id="view-setup" class="view view-setup" hidden>
+      <div class="panel">
+        <header class="panel-head">
+          <button id="btn-setup-back" class="btn btn-ghost btn-icon" aria-label="Volver">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H6M11 6l-6 6 6 6"/></svg>
+          </button>
+          <h2>Nueva sesión</h2>
+        </header>
+
+        <form id="setup-form" novalidate>
+          <fieldset>
+            <legend><span class="step-num">01</span> Título de la actividad</legend>
+            <input id="setup-title" type="text" maxlength="60" autocomplete="off"
+                   placeholder="Ej.: Lluvia de ideas sobre el aprendizaje">
+          </fieldset>
+
+          <fieldset>
+            <legend><span class="step-num">02</span> Preguntas <span class="legend-hint" id="q-count">0 preguntas</span></legend>
+            <textarea id="setup-questions" rows="4" maxlength="600"
+              placeholder="Escribe una pregunta por línea:&#10;¿Qué palabra relacionas con una buena experiencia de aprendizaje?&#10;¿Qué esperas aprender en esta asignatura?&#10;¿Qué estrategia te ayuda más a aprender?"></textarea>
+            <p class="field-hint">Una pregunta por línea. Máximo 10 preguntas.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend><span class="step-num">03</span> Reglas de la tormenta</legend>
+            <div class="rule-row">
+              <label for="setup-max">Respuestas máximas por alumno y pregunta</label>
+              <input id="setup-max" type="number" min="1" max="10" value="3" inputmode="numeric">
+            </div>
+            <div class="rule-row">
+              <div>
+                <label for="setup-repeat" class="switch-label">Permitir repetir la misma respuesta</label>
+                <p class="field-hint">Si se desactiva, un alumno no podrá enviar dos veces la misma palabra.</p>
+              </div>
+              <label class="switch"><input type="checkbox" id="setup-repeat" checked><span class="track"></span></label>
+            </div>
+            <div class="rule-row">
+              <div>
+                <label for="setup-anon" class="switch-label">Respuestas anónimas</label>
+                <p class="field-hint">Si se activa, no se pedirá el nombre al entrar.</p>
+              </div>
+              <label class="switch"><input type="checkbox" id="setup-anon" checked><span class="track"></span></label>
+            </div>
+          </fieldset>
+
+          <button type="submit" class="btn btn-ink btn-lg btn-block">Crear sesión y obtener código</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ════════════════ VISTA: PANEL DEL PROFESOR EN DIRECTO ════════════════ -->
+    <section id="view-live" class="view view-live" hidden>
+      <header class="live-top no-print">
+        <div class="live-brand">
+          <p class="brand small">
+            <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            Chubasco
+          </p>
+          <span class="live-activity" id="live-title"></span>
+        </div>
+
+        <button id="live-code-btn" class="code-pill" title="Copiar el código de sesión">
+          <span class="code-label">Código</span>
+          <b id="live-code-text">···-···</b>
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>
+        </button>
+
+        <button id="btn-show-qr" class="btn btn-ghost btn-icon" title="Mostrar QR para entrar">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3z"/><path d="M21 14v7M21 17.5h-.01M17.5 21H14"/></svg>
+          QR
+        </button>
+
+        <span id="live-status-badge" class="status-badge st-waiting">En espera</span>
+        <button id="btn-leave-live" class="btn btn-ghost btn-sm">Salir</button>
+      </header>
+
+      <div class="live-question-row no-print">
+        <h2 id="live-question" class="live-question"></h2>
+        <div class="live-stats">
+          <div class="stat"><b id="stat-qnum">–</b><span>Pregunta</span></div>
+          <div class="stat"><b id="stat-people">0</b><span>Participantes</span></div>
+          <div class="stat"><b id="stat-answers" data-v="0">0</b><span>Respuestas</span></div>
+        </div>
+      </div>
+
+      <nav id="qnav" class="qnav no-print" aria-label="Preguntas de la sesión"></nav>
+
+      <main class="stage">
+        <div id="storm" class="storm" aria-label="Tormenta de palabras">
+          <div class="storm-empty" id="storm-empty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 15a3.5 3.5 0 0 0 0-7 5.5 5.5 0 0 0-10.8 1.2A4 4 0 0 0 7 15h10.5z"/><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"/></svg>
+            <p><b>La tormenta aún no ha empezado.</b><br>Comparte el código con tu clase y pulsa «Abrir pregunta».</p>
+          </div>
+          <span class="storm-overflow" id="storm-overflow" hidden></span>
+        </div>
+
+        <div id="results-panel" class="results-panel" hidden>
+          <div class="results-head">
+            <h3>Resultados <span id="res-q-tag" class="res-q-tag"></span></h3>
+            <div class="seg" role="group" aria-label="Ordenar resultados">
+              <button id="sort-freq" class="seg-btn active" type="button">Por frecuencia</button>
+              <button id="sort-alpha" class="seg-btn" type="button">Alfabético</button>
+            </div>
+          </div>
+          <p class="res-summary" id="res-summary"></p>
+          <div class="res-scroll">
+            <table class="res-table">
+              <thead>
+                <tr><th>#</th><th>Respuesta</th><th class="num">Frec.</th><th class="num">%</th><th class="bar-cell"></th><th></th></tr>
+              </thead>
+              <tbody id="res-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Interfaz del modo proyector (solo visible en ese modo) -->
+        <div class="projector-ui">
+          <p class="pj-question" id="pj-question"></p>
+          <div class="pj-corner">
+            <span class="pj-count" id="pj-count"></span>
+            <button id="btn-exit-projector" class="btn btn-ghost btn-sm">
+              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              Salir
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <footer class="console no-print">
+        <button id="btn-toggle-status" class="btn btn-ink btn-sm"></button>
+        <button id="btn-close-q" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          Cerrar pregunta
+        </button>
+        <button id="btn-next-q" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h14M13 6l6 6-6 6"/></svg>
+          Siguiente pregunta
+        </button>
+        <button id="btn-reset-q" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/></svg>
+          Reiniciar
+        </button>
+        <span class="console-sep"></span>
+        <button id="btn-view-results" class="btn btn-ghost btn-sm"></button>
+        <button id="btn-demo" class="btn btn-demo btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
+          Lluvia demo
+        </button>
+        <button id="btn-projector" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          Proyector
+        </button>
+        <button id="btn-export" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+          Exportar CSV
+        </button>
+        <button id="btn-print" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V4h10v4"/><rect x="4" y="8" width="16" height="8" rx="2"/><rect x="7" y="14" width="10" height="6"/></svg>
+          Imprimir / PDF
+        </button>
+        <button id="btn-export-png" class="btn btn-ghost btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-4.5-4.5L5 21"/></svg>
+          Exportar PNG
+        </button>
+        <span class="console-sep"></span>
+        <button id="btn-end" class="btn btn-danger btn-sm">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h12l-2.5 4L17 12H5"/></svg>
+          Finalizar sesión
+        </button>
+      </footer>
+    </section>
+
+    <!-- ════════════════ VISTA: ALUMNO · ENTRAR CON CÓDIGO ════════════════ -->
+    <section id="view-join" class="view view-join" hidden>
+      <div class="panel panel-join">
+        <p class="brand">
+          <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          Chubasco
+        </p>
+        <form id="join-form" novalidate>
+          <div id="join-step1">
+            <label class="join-label" for="join-code">Código de la clase</label>
+            <input id="join-code" class="join-code-input" type="text" maxlength="7"
+                   placeholder="ABC-123" autocomplete="off" autocapitalize="characters" spellcheck="false">
+            <p id="join-error" class="join-error" role="alert" hidden></p>
+            <button type="submit" class="btn btn-ink btn-lg btn-block">Entrar</button>
+          </div>
+          <div id="join-step2" hidden>
+            <label class="join-label" for="join-name">¿Cómo te llamas? <small>(opcional)</small></label>
+            <input id="join-name" type="text" maxlength="24" autocomplete="off"
+                   placeholder="Puedes quedarte en anónimo">
+            <button type="submit" class="btn btn-ink btn-lg btn-block">Entrar en la sesión</button>
+            <button type="button" id="btn-join-back" class="btn btn-ghost btn-sm btn-block">Cambiar código</button>
+          </div>
+        </form>
+        <button id="btn-join-home" class="linklike">Volver al inicio</button>
+      </div>
+    </section>
+
+    <!-- ════════════════ VISTA: ALUMNO · SESIÓN ════════════════ -->
+    <section id="view-student" class="view view-student" hidden>
+      <div class="student-card">
+        <header class="student-top">
+          <span class="code-pill small"><b id="student-code"></b></span>
+          <span class="student-activity" id="student-title"></span>
+          <button id="btn-student-leave" class="btn btn-ghost btn-sm">Salir</button>
+        </header>
+        <div id="student-zone" aria-live="polite"><!-- Se rellena con JS --></div>
+        <p class="student-meta" id="student-meta"></p>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Tooltip al hacer clic en una palabra de la tormenta -->
+  <div id="word-tooltip" role="status" hidden>
+    <p class="wt-word" id="wt-word"></p>
+    <p class="wt-stats" id="wt-stats"></p>
+    <p class="wt-authors" id="wt-authors" hidden></p>
+    <button id="wt-delete" class="wt-delete" type="button">
+      <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+      Eliminar respuesta
+    </button>
+  </div>
+
+  <!-- Overlay QR para proyectar el acceso de los alumnos -->
+  <div id="qr-overlay" hidden>
+    <div class="qr-card">
+      <button id="qr-close" class="btn btn-ghost btn-icon qr-close" aria-label="Cerrar">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <p class="brand">
+        <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        Chubasco
+      </p>
+      <p class="qr-hint">Escanea con el móvil o escribe el código</p>
+      <div id="qr-box" aria-label="Código QR de la sesión"></div>
+      <p class="qr-code" id="qr-code-text">···-···</p>
+      <p class="qr-url" id="qr-url-text"></p>
+      <button id="qr-copy-link" class="btn btn-ghost btn-sm">Copiar enlace de acceso</button>
+    </div>
+  </div>
+
+  <!-- Avisos emergentes -->
+  <div id="toasts" aria-live="polite"></div>
+
+  <!-- Área de impresión / PDF (solo visible al imprimir) -->
+  <div id="print-area"></div>
+
+  <noscript><p style="padding:2rem;text-align:center">Esta aplicación necesita JavaScript para funcionar.</p></noscript>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
