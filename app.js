@@ -2,9 +2,8 @@
 
 /* ============================================================
    CHUBASCO · Tormenta de palabras para el aula
-   VERSIÓN FINAL: V2 multiusuario + Fase 1 + Fase 2 + Fase 3A
-   (tipos de pregunta, escala 1-5 con boxplot, votaciones,
-   cerradura de profesor con profKey)
+   VERSIÓN FINAL: V2 multiusuario + Fases 1, 2, 3A + cerradura
+   de profesor y alumnos confinados a su pantalla
    ============================================================ */
 
 /* ============================================================
@@ -15,6 +14,11 @@ const S_KEY     = 'chubasco:student';
 const H_KEY     = 'chubasco:history';
 const THEME_KEY = 'chubasco:theme';
 const SOUND_KEY = 'chubasco:sound';
+
+/* ⚠️ CLAVE DEL PROFESOR — cámbiala por la que quieras.
+   Sin esta clave nadie puede abrir el panel del profesor.
+   (Letras, números o guiones, sin espacios) */
+const TEACHER_PASS = 'PROFE-2025';
 
 const MAX_LEN    = 40;
 const COOLDOWN   = 1200;
@@ -206,7 +210,7 @@ function sessionView(){
   return Object.assign({}, session, { questions });
 }
 
-/* --- Cerradura de profesor --- */
+/* --- Cerradura de profesor (profKey) --- */
 function generateProfKey(){
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let k = '';
@@ -448,6 +452,80 @@ function startRain(){
 }
 
 /* ============================================================
+   4cuarto · CERRADURA DEL MODO PROFESOR
+   Pide TEACHER_PASS antes de abrir el panel. La clave se
+   recuerda por pestaña (sessionStorage) para no teclearla
+   cada vez. Los alumnos nunca la necesitan.
+============================================================ */
+const PASS_SESSION = 'chubasco:prolock';
+let passCb = null;
+
+function ensurePassUI(){
+  if ($('#pass-overlay')) return;
+
+  // Estilos propios del overlay (autocontenidos, no tocan style.css)
+  const st = document.createElement('style');
+  st.textContent = '#pass-overlay{position:fixed;inset:0;z-index:75;display:flex;align-items:center;justify-content:center;background:rgba(35,32,26,.45);backdrop-filter:blur(3px);padding:20px}';
+  document.head.append(st);
+
+  const ov = el('div'); ov.id = 'pass-overlay'; ov.hidden = true;
+  const card = el('div', 'qr-card');
+
+  const close = el('button', 'btn btn-ghost btn-icon qr-close');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Cerrar');
+  close.innerHTML = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  close.addEventListener('click', () => { ov.hidden = true; passCb = null; });
+  card.append(close);
+
+  card.append(el('p', 'zone-title', 'Panel del profesor'));
+  card.append(el('p', 'qr-hint', 'Escribe la clave de profesor para continuar'));
+
+  const input = el('input');
+  input.type = 'password';
+  input.maxLength = 24;
+  input.autocomplete = 'off';
+  input.placeholder = 'Clave';
+  input.style.cssText = 'width:100%;background:var(--white);border:var(--border);border-radius:12px;padding:12px 14px;text-align:center;font-weight:700;letter-spacing:.25em';
+  card.append(input);
+
+  const err = el('p', 'join-error', 'Clave incorrecta.');
+  err.hidden = true;
+  card.append(err);
+
+  const ok = el('button', 'btn btn-ink btn-lg btn-block', 'Entrar al panel');
+  ok.type = 'button';
+  card.append(ok);
+  ov.append(card);
+  document.body.append(ov);
+
+  const attempt = () => {
+    if (input.value === TEACHER_PASS){
+      try{ sessionStorage.setItem(PASS_SESSION, '1'); }catch(e){}
+      ov.hidden = true; err.hidden = true; input.value = '';
+      const cb = passCb; passCb = null;
+      if (cb) cb();
+    } else {
+      err.hidden = false;
+      input.value = '';
+      input.focus();
+    }
+  };
+  ok.addEventListener('click', attempt);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+}
+
+function askTeacherPass(cb){
+  let unlocked = false;
+  try{ unlocked = sessionStorage.getItem(PASS_SESSION) === '1'; }catch(e){}
+  if (unlocked){ cb(); return; }
+  ensurePassUI();
+  passCb = cb;
+  $('#pass-overlay').hidden = false;
+  setTimeout(() => $('#pass-overlay input').focus(), 60);
+}
+
+/* ============================================================
    5 · FONDO DECORATIVO
 ============================================================ */
 function buildBackgroundWords(){
@@ -604,12 +682,14 @@ function readQuestionCards(){
   }
 });
 
- $('#btn-go-setup').addEventListener('click', () => {
+/* Acceso al panel del profesor: protegido por clave */
+ $('#btn-go-setup').addEventListener('click', () => askTeacherPass(() => {
   showView('setup');
   if (!$$('#qcards .qcard').length) $('#qcards').append(makeQCard());
   updateQCount();
   setTimeout(() => $('#setup-title').focus(), 60);
-});
+}));
+
  $('#btn-setup-back').addEventListener('click', () => showView('home'));
  $('#btn-go-join').addEventListener('click', () => {
   showView('join'); resetJoin();
@@ -659,7 +739,7 @@ function renderHistory(){
 
     const open = el('button', 'btn btn-ghost btn-sm', 'Abrir');
     open.type = 'button';
-    open.addEventListener('click', () => openHistorySession(h));
+    open.addEventListener('click', () => askTeacherPass(() => openHistorySession(h)));
 
     const del = el('button', 'btn btn-ghost btn-sm', 'Quitar');
     del.type = 'button';
@@ -887,10 +967,6 @@ function animateNumber(elm, to){
 /* ============================================================
    8 · LA TORMENTA DE PALABRAS
 ============================================================ */
-/**
- * Agrupa respuestas por clave y añade los votos recibidos
- * (solo cuentan los votos de palabras que aún existen).
- */
 function computeWords(q){
   const groups = new Map();
   for (const r of q.responses){
@@ -1539,7 +1615,10 @@ function finishJoin(name){
 }
 
  $('#btn-join-back').addEventListener('click', resetJoin);
- $('#btn-join-home').addEventListener('click', () => showView('home'));
+
+/* Los alumnos no salen al inicio: permanecen en su pantalla */
+ $('#btn-join-home').hidden = true;
+
  $('#btn-student-leave').addEventListener('click', () => {
   stopWatching();
   student = null;
@@ -1644,411 +1723,4 @@ function renderStudent(){
 
   const s = session;
   $('#student-code').textContent = s.code;
-  $('#student-title').textContent = s.title;
-
-  const meta = $('#student-meta');
-  if (s.ended){
-    meta.textContent = 'Puedes cerrar esta página. ¡Gracias por participar!';
-  } else {
-    meta.textContent = 'La clase lleva ' + responses.filter(r => !r.deleted).length +
-      (responses.length === 1 ? ' respuesta' : ' respuestas');
-  }
-
-  if (s.ended){
-    if (lastStudentSig !== 'ended'){
-      lastStudentSig = 'ended';
-      const z = $('#student-zone');
-      z.textContent = '';
-      z.append(messageZone(SVG_CLOUD, 'La sesión ha finalizado', '¡Gracias por participar en la tormenta de palabras!'));
-    }
-    return;
-  }
-
-  const q = questions[clamp(s.current, 0, questions.length - 1)];
-  const mine = q.responses.filter(r => r.authorId === student.authorId);
-  const remaining = s.settings.maxPerStudent - mine.length;
-  const showingSent = justSent && justSent.until > Date.now();
-  const myVotesN = (q.votesList || []).filter(v => v.voterId === student.authorId).length;
-
-  const sig = [q.id, q.status, mine.length, showingSent ? justSent.text : '',
-               q.voting ? 'V' + myVotesN : '', q.type].join('|');
-  if (sig === lastStudentSig) return;
-  lastStudentSig = sig;
-
-  const z = $('#student-zone');
-  z.textContent = '';
-
-  if (q.status === 'waiting'){
-    z.append(messageZone(SVG_CLOCK, 'Espera un momento…', 'Tu profe todavía no ha abierto la pregunta.'));
-    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
-    return;
-  }
-  if (q.status === 'paused'){
-    z.append(messageZone(SVG_PAUSE, 'La tormenta está en pausa', 'Aprovecha para pensar tu respuesta.'));
-    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
-    return;
-  }
-  if (q.status === 'closed'){
-    z.append(messageZone(SVG_NEXT, 'Pregunta cerrada', 'Esperando la siguiente pregunta…'));
-    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
-    return;
-  }
-
-  // Pregunta abierta
-  if (showingSent){
-    const box = el('div', 'sent-box');
-    box.append(checkSVG());
-    box.append(el('p', 'sent-word', '“' + justSent.text + '”'));
-    box.append(el('p', 'zone-sub', '¡Respuesta recibida! Ya vuela en la tormenta de la clase.'));
-    if (remaining > 0){
-      const again = el('button', 'btn btn-ghost btn-sm', 'Enviar otra palabra');
-      again.type = 'button';
-      again.addEventListener('click', () => { justSent = null; lastStudentSig = null; renderStudent(); });
-      box.append(again);
-    }
-    z.append(box);
-    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
-    return;
-  }
-
-  if (remaining <= 0){
-    const box = el('div', 'zone-msg');
-    box.append(el('p', 'zone-title', 'Ya has enviado tus ' + s.settings.maxPerStudent +
-      (s.settings.maxPerStudent === 1 ? ' respuesta' : ' respuestas')));
-    box.append(el('p', 'zone-sub', '¡Bien jugado!'));
-    z.append(box);
-    appendMyWords(z, mine);
-    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
-    return;
-  }
-
-  z.append(el('p', 'q-text', q.text));
-
-  if (q.type === 'scale'){
-    // ---- Escala 1–5: cinco botones grandes ----
-    if (q.scaleMin || q.scaleMax){
-      const ends = el('div', 'scale-ends-stu');
-      ends.append(el('span', '', '1 = ' + (q.scaleMin || '')));
-      ends.append(el('span', '', (q.scaleMax || '') + ' = 5'));
-      z.append(ends);
-    }
-    const row = el('div', 'scale-row');
-    for (let n = 1; n <= 5; n++){
-      const b = el('button', 'scale-btn', String(n));
-      b.type = 'button';
-      b.addEventListener('click', () => submitStudentAnswer(String(n)));
-      row.append(b);
-    }
-    z.append(row);
-  } else {
-    // ---- Palabra: formulario ----
-    const form = el('form', 'answer-form');
-    const input = el('input');
-    input.type = 'text';
-    input.maxLength = MAX_LEN;
-    input.placeholder = 'Escribe tu respuesta…';
-    input.autocomplete = 'off';
-    const send = el('button', 'btn btn-ink');
-    send.type = 'submit';
-    send.innerHTML = SEND_SVG + ' Enviar';
-    form.append(input, send);
-    z.append(form);
-
-    const note = el('p', 'remaining-note');
-    const cc = el('span');
-    cc.textContent = '0/' + MAX_LEN;
-    note.append(cc, document.createTextNode(' · te quedan ' + remaining + (remaining === 1 ? ' respuesta' : ' respuestas')));
-    z.append(note);
-    appendMyWords(z, mine);
-
-    input.addEventListener('input', () => { cc.textContent = input.value.length + '/' + MAX_LEN; });
-    form.addEventListener('submit', e => { e.preventDefault(); submitStudentAnswer(input.value); });
-
-    if (matchMedia('(pointer:fine)').matches) input.focus();
-  }
-
-  if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
-}
-
-function submitStudentAnswer(raw){
-  if (!session || session.ended) return;
-  const q = questions[clamp(session.current, 0, questions.length - 1)];
-  if (q.status !== 'open'){ toast('La pregunta no está abierta', 'warn'); return; }
-
-  const now = Date.now();
-  if (now - lastSubmitTs < COOLDOWN){ toast('Un momento, no tan rápido', 'warn'); return; }
-
-  const mine = q.responses.filter(r => r.authorId === student.authorId);
-  if (mine.length >= session.settings.maxPerStudent){ toast('Ya has usado todas tus respuestas', 'warn'); return; }
-
-  let text, key;
-  if (q.type === 'scale'){
-    const n = parseInt(raw, 10);
-    if (!(n >= 1 && n <= 5)) return;
-    text = String(n);
-    key = String(n);                       // claves "1".."5"
-  } else {
-    text = sanitizeAnswer(raw);
-    key = text ? normalizeKey(text) : null;
-    if (!text || !key){ toast('Esa respuesta no es válida', 'warn'); return; }
-
-    const blocked = session.settings.blocked || [];
-    if (blocked.some(b => key.includes(b))){
-      toast('El profe ha bloqueado esa palabra en esta actividad', 'warn');
-      return;
-    }
-  }
-
-  if (!session.settings.allowRepeated && mine.some(r => r.key === key)){
-    toast('Ya enviaste esa misma respuesta', 'warn');
-    return;
-  }
-
-  lastSubmitTs = now;
-  justSent = { text, until: now + 1900 };
-  renderStudent();
-
-  addResponse(session.code, q.id, {
-    text, key,
-    authorId: student.authorId,
-    authorName: student.name,
-    ts: now
-  }).then(() => {
-    setTimeout(renderStudent, 1950);
-  }).catch(err => {
-    console.error(err);
-    justSent = null;
-    lastStudentSig = null;
-    renderStudent();
-    toast('No se pudo enviar (¿sin conexión?)', 'warn');
-  });
-}
-
-/* ============================================================
-   11 · LLUVIA DE DEMOSTRACIÓN (solo preguntas de palabra)
-============================================================ */
-const DEMO_POOL = [
-  'motivación','curiosidad','curiosidad','proyectos','práctica','práctica','ejemplos','compañeros',
-  'dudas','exámenes','nervios','escuchar','preguntar','experimentar','jugar','vídeos',
-  'aburrimiento','apuntes','trabajo en grupo','error','paciencia','música','mapas mentales',
-  'profesor','repasar','dormir','café','tecnología','lectura','ensayo'
-];
-let demoAuthors = null;
-
- $('#btn-demo').addEventListener('click', () => {
-  const q = currentQ();
-  if (!q || q.type === 'scale') return;
-  if (q.status !== 'open'){ toast('Abre la pregunta antes de lanzar la lluvia demo', 'warn'); return; }
-  if (!demoAuthors) demoAuthors = Array.from({ length: 12 }, () => uid());
-
-  const n = 12 + Math.floor(Math.random() * 6);
-  for (let i = 0; i < n; i++){
-    setTimeout(() => {
-      const text = DEMO_POOL[Math.floor(Math.random() * DEMO_POOL.length)];
-      const key = normalizeKey(text);
-      const authorId = demoAuthors[Math.floor(Math.random() * demoAuthors.length)];
-      if (!session || (!session.settings.allowRepeated &&
-          q.responses.some(r => r.authorId === authorId && r.key === key))) return;
-      addResponse(session.code, q.id, { text, key, authorId, authorName: null, ts: Date.now(), demo: true })
-        .catch(err => console.error(err));
-    }, i * 230);
-  }
-  toast('Lluvia de demostración en camino…');
-});
-
-/* ============================================================
-   11bis · QR, PROYECTOR Y PNG
-============================================================ */
-function buildJoinURL(code){
-  return location.href.split('#')[0].split('?')[0] + '#' + code;
-}
-
-function openQrOverlay(){
-  if (!session) return;
-  const url = buildJoinURL(session.code);
-
-  $('#qr-code-text').textContent = session.code;
-  $('#qr-url-text').textContent = url;
-
-  const box = $('#qr-box');
-  box.textContent = '';
-  if (typeof QRCode === 'undefined'){
-    box.append(el('p', 'qr-fallback', session.code));
-    toast('No se pudo generar el QR (sin conexión). Proyecta el código.', 'warn');
-  } else {
-    new QRCode(box, {
-      text: url,
-      width: 250, height: 250,
-      colorDark: '#23201A', colorLight: '#FFFFFF',
-      correctLevel: QRCode.CorrectLevel.M
-    });
-  }
-  $('#qr-overlay').hidden = false;
-}
-
-function closeQrOverlay(){ $('#qr-overlay').hidden = true; }
-
- $('#btn-show-qr').addEventListener('click', openQrOverlay);
- $('#qr-close').addEventListener('click', closeQrOverlay);
- $('#qr-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeQrOverlay(); });
-
- $('#qr-copy-link').addEventListener('click', async () => {
-  if (!session) return;
-  try{
-    await navigator.clipboard.writeText(buildJoinURL(session.code));
-    toast('Enlace copiado');
-  }catch(e){ toast(buildJoinURL(session.code)); }
-});
-
-function enterProjector(){
-  if (!session) return;
-  liveState.mode = 'storm';
-  renderLive();
-  document.body.classList.add('projector');
-  const stage = $('.stage');
-  if (stage.requestFullscreen)       stage.requestFullscreen().catch(() => {});
-  else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
-}
-
-function exitProjector(){
-  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
-  document.body.classList.remove('projector');
-  renderLive();
-}
-
- $('#btn-projector').addEventListener('click', enterProjector);
- $('#btn-exit-projector').addEventListener('click', exitProjector);
-
-document.addEventListener('fullscreenchange', () => {
-  if (!document.fullscreenElement) document.body.classList.remove('projector');
-});
-
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  if (!$('#qr-overlay').hidden) closeQrOverlay();
-  else if (document.body.classList.contains('projector')) exitProjector();
-});
-
-function wrapCanvasText(ctx, text, x, y, maxW, lh){
-  let line = '';
-  for (const w of String(text).split(' ')){
-    const test = line ? line + ' ' + w : w;
-    if (line && ctx.measureText(test).width > maxW){ ctx.fillText(line, x, y); y += lh; line = w; }
-    else line = test;
-  }
-  if (line) ctx.fillText(line, x, y);
-}
-
- $('#btn-export-png').addEventListener('click', () => {
-  const q = currentQ();
-  if (!q) return;
-  const words = computeWords(q);
-  if (!words.length){ toast('Todavía no hay respuestas que exportar', 'warn'); return; }
-  toast('Generando imagen de la nube…');
-  const fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
-  fontsReady.then(() => exportStormPNG(sessionView(), q, words));
-});
-
-/* El PNG sale siempre en estilo papel claro: es para diapositivas e impresión */
-function exportStormPNG(s, q, words){
-  const W = 1600, H = 900;
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#FCFAF4';
-  ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = 'rgba(35,32,26,.055)';
-  for (let y = 24; y < H; y += 22)
-    for (let x = 24; x < W; x += 22) ctx.fillRect(x, y, 2, 2);
-
-  const HEAD_H = 175, FOOT_H = 75;
-  const placed = [
-    { x: 0, y: 0, w: W, h: HEAD_H },
-    { x: 0, y: H - FOOT_H, w: W, h: FOOT_H }
-  ];
-
-  const shown = words.slice(0, 70);
-  const maxCount = Math.max(...shown.map(w => w.count));
-  const minS = 30, maxS = 118;
-
-  ctx.textBaseline = 'top';
-  shown.forEach(w => {
-    const label = w.text + (w.votes ? '  ★' + w.votes : '');
-    const fontSize = Math.round(minS + (maxS - minS) * Math.sqrt(w.count / maxCount));
-    ctx.font = '700 ' + fontSize + 'px "Space Grotesk", "Segoe UI", sans-serif';
-    const tw = ctx.measureText(label).width;
-    const th = fontSize * 1.15;
-    const spot = findSpot(W, H, tw, th, placed);
-    placed.push({ x: spot.x, y: spot.y, w: tw, h: th });
-    ctx.fillStyle = colorOf(w.key);
-    ctx.fillText(label, spot.x, spot.y + (th - fontSize) / 2);
-  });
-
-  const drop = new Path2D('M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z');
-  ctx.save();
-  ctx.translate(50, 36); ctx.scale(2.4, 2.4);
-  ctx.fillStyle = '#FF5D3A'; ctx.fill(drop);
-  ctx.lineWidth = 1.6 / 2.4; ctx.strokeStyle = '#23201A'; ctx.stroke(drop);
-  ctx.restore();
-
-  ctx.fillStyle = '#23201A';
-  ctx.font = '700 30px "Fraunces", Georgia, serif';
-  ctx.fillText('Chubasco', 122, 44);
-
-  ctx.font = '600 36px "Fraunces", Georgia, serif';
-  wrapCanvasText(ctx, q.text, 50, 102, W - 100, 46);
-
-  const people = new Set(q.responses.map(r => r.authorId)).size;
-  ctx.font = '500 22px "Space Grotesk", "Segoe UI", sans-serif';
-  ctx.fillStyle = '#6B6455';
-  ctx.fillText(
-    s.title + '  ·  Código ' + s.code + '  ·  ' + q.responses.length +
-    (q.responses.length === 1 ? ' respuesta' : ' respuestas') + '  ·  ' +
-    people + ' participantes  ·  ' + new Date().toLocaleDateString('es-ES'),
-    50, H - 48);
-
-  canvas.toBlob(blob => {
-    const a = el('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'chubasco-' + s.code + '-nube.png';
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    toast('Imagen PNG descargada');
-  }, 'image/png');
-}
-
-/* ============================================================
-   12 · ARRANQUE
-============================================================ */
-(function init(){
-  applyTheme(currentTheme());
-  renderSoundBtn();
-  buildBackgroundWords();
-  startRain();
-  renderHistory();
-
-  try{
-    const raw = sessionStorage.getItem(S_KEY);
-    if (raw && FIREBASE_OK){
-      const st = JSON.parse(raw);
-      if (st && st.code){
-        student = st;
-        lastStudentSig = null;
-        watchSession(st.code);
-        showView('student');
-        renderStudent();
-        return;
-      }
-    }
-  }catch(e){}
-
-  if (teacherCode && FIREBASE_OK){
-    watchSession(teacherCode);
-    showView('live');
-    renderLive();
-    return;
-  }
-
-  if (!autoJoinFromURL()) showView('home');
-})();
+  $('#student-title').textContent = s.title
