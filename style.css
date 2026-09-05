@@ -1,6 +1,6 @@
 /* ============================================================
    CHUBASCO · Tormenta de palabras para el aula
-   Hoja de estilos (Fase 1: + historial, bloqueadas, gráficos)
+   Fase 3A: + editor de preguntas, escala, votos, boxplot
    ============================================================ */
 
 :root{
@@ -17,10 +17,39 @@
   --raspberry: #D1465F;
   --leaf:      #6FA540;
 
+  --sh1: rgba(35,32,26,.16);
+  --sh2: rgba(35,32,26,.9);
+  --sh3: rgba(35,32,26,.85);
+  --sh4: rgba(35,32,26,.3);
+  --sh5: rgba(35,32,26,.1);
+  --sh6: rgba(35,32,26,.15);
+  --track-bg: rgba(35,32,26,.07);
+  --dots: rgba(35,32,26,.05);
+
   --border: 1.5px solid var(--ink);
   --shadow-soft: 0 10px 30px rgba(35,32,26,.07);
   --font-display: "Fraunces", Georgia, serif;
   --font-body: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+/* ---------- Tema oscuro ---------- */
+:root[data-theme="dark"]{
+  --paper:     #171511;
+  --paper-2:   #201D18;
+  --ink:       #EFE9DD;
+  --ink-soft:  #A89D89;
+  --line:      #3B372E;
+  --white:     #26231D;
+
+  --sh1: rgba(0,0,0,.4);
+  --sh2: rgba(0,0,0,.65);
+  --sh3: rgba(0,0,0,.6);
+  --sh4: rgba(0,0,0,.5);
+  --sh5: rgba(0,0,0,.35);
+  --sh6: rgba(0,0,0,.4);
+  --track-bg: rgba(255,255,255,.09);
+  --dots: rgba(255,255,255,.06);
+  --shadow-soft: 0 10px 30px rgba(0,0,0,.35);
 }
 
 /* ---------- Base ---------- */
@@ -30,7 +59,7 @@ body{
   font-family:var(--font-body);
   color:var(--ink);
   background-color:var(--paper);
-  background-image:radial-gradient(rgba(35,32,26,.05) 1px, transparent 1px);
+  background-image:radial-gradient(var(--dots) 1px, transparent 1px);
   background-size:22px 22px;
   line-height:1.5;
   -webkit-font-smoothing:antialiased;
@@ -40,6 +69,11 @@ button{ font:inherit; color:inherit; background:none; border:none; cursor:pointe
 input,textarea{ font:inherit; color:inherit }
 :focus-visible{ outline:3px solid rgba(255,93,58,.85); outline-offset:2px; border-radius:6px }
 .i{ width:18px; height:18px; flex:none }
+
+/* ---------- Lluvia ambiental ---------- */
+#rain{ position:fixed; inset:0; z-index:0; pointer-events:none }
+body.projector #rain{ display:none }
+@media (prefers-reduced-motion: reduce){ #rain{ display:none } }
 
 /* ---------- Fondo decorativo ---------- */
 #bg-words{ position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:0; transition:opacity .5s }
@@ -57,16 +91,21 @@ body:not([data-view="home"]) #bg-words{ opacity:.28 }
 .app{ position:relative; z-index:1; min-height:100dvh; display:flex; flex-direction:column }
 .view{ flex:1; display:flex; flex-direction:column }
 
+/* ---------- Botón de tema ---------- */
+.theme-toggle{ position:fixed; top:12px; right:12px; z-index:65 }
+body[data-view="live"] .theme-toggle,
+body.projector .theme-toggle{ display:none }
+
 /* ---------- Botones ---------- */
 .btn{
   display:inline-flex; align-items:center; justify-content:center; gap:9px;
   padding:10px 18px; border:var(--border); border-radius:12px;
   background:var(--white); font-weight:500; user-select:none;
-  box-shadow:3px 3px 0 rgba(35,32,26,.16);
+  box-shadow:3px 3px 0 var(--sh1);
   transition:transform .15s, box-shadow .15s, background .15s;
 }
-.btn:hover{ transform:translate(-1px,-1px); box-shadow:4px 4px 0 rgba(35,32,26,.9) }
-.btn:active{ transform:translate(1px,1px); box-shadow:1px 1px 0 rgba(35,32,26,.9) }
+.btn:hover{ transform:translate(-1px,-1px); box-shadow:4px 4px 0 var(--sh2) }
+.btn:active{ transform:translate(1px,1px); box-shadow:1px 1px 0 var(--sh2) }
 .btn:disabled{ opacity:.45; pointer-events:none }
 .btn-ink{ background:var(--ink); color:var(--paper) }
 .btn-ink:hover{ box-shadow:5px 5px 0 var(--coral) }
@@ -75,6 +114,7 @@ body:not([data-view="home"]) #bg-words{ opacity:.28 }
 .btn-danger:hover{ box-shadow:4px 4px 0 var(--raspberry) }
 .btn-demo{ border-style:dashed; color:var(--ink-soft) }
 .btn.armed{ background:var(--raspberry); color:#fff; border-color:var(--raspberry) }
+.btn.voting-on{ background:var(--mustard); border-color:var(--ink) }
 .btn-lg{ padding:14px 24px; font-size:1.05rem; border-radius:14px }
 .btn-sm{ padding:8px 13px; font-size:.9rem; border-radius:10px }
 .btn-icon{ padding:9px }
@@ -107,7 +147,7 @@ body:not([data-view="home"]) #bg-words{ opacity:.28 }
 }
 .home-note strong{ color:var(--ink) }
 
-/* ---------- Historial de sesiones ---------- */
+/* ---------- Historial ---------- */
 .history-box{ margin-top:30px; text-align:left }
 .history-title{ font-family:var(--font-display); font-size:1.1rem; font-weight:600; margin-bottom:10px }
 .history-item{
@@ -119,12 +159,12 @@ body:not([data-view="home"]) #bg-words{ opacity:.28 }
 .history-item .h-date{ font-size:.78rem; color:var(--ink-soft) }
 .history-item .h-actions{ margin-left:auto; display:flex; gap:6px }
 
-/* ---------- Paneles (configuración, join) ---------- */
+/* ---------- Paneles ---------- */
 .view-setup{ padding:20px }
 .panel{
   width:min(660px,94vw); margin:auto; padding:clamp(20px,4vw,36px);
   background:var(--paper-2); border:var(--border); border-radius:20px;
-  box-shadow:8px 8px 0 rgba(35,32,26,.1);
+  box-shadow:8px 8px 0 var(--sh5);
 }
 .panel-head{ display:flex; align-items:center; gap:14px; margin-bottom:22px }
 .panel-head h2{ font-family:var(--font-display); font-size:1.7rem; font-weight:600 }
@@ -138,7 +178,6 @@ input[type=text],input[type=number],textarea{
 }
 input:focus,textarea:focus{ outline:none; border-color:var(--coral); box-shadow:3px 3px 0 rgba(255,93,58,.3) }
 textarea{ resize:vertical; min-height:44px; line-height:1.55 }
-#setup-questions{ min-height:110px }
 .field-hint{ font-size:.82rem; color:var(--ink-soft); margin-top:6px }
 .rule-row{
   display:flex; align-items:center; justify-content:space-between; gap:16px;
@@ -150,6 +189,32 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .rule-block{ padding:13px 0 0 }
 .rule-block label{ display:block; font-weight:500; margin-bottom:6px }
 .rule-block label small{ font-weight:400; color:var(--ink-soft) }
+
+/* ---------- Tarjetas de pregunta (editor) ---------- */
+.qcard{
+  background:var(--white); border:var(--border); border-radius:14px;
+  padding:14px; margin-bottom:12px;
+}
+.qcard-head{ display:flex; align-items:center; gap:10px; margin-bottom:8px }
+.qcard-head b{ font-family:var(--font-display); font-style:italic; color:var(--coral) }
+.qcard-head .qdel{
+  margin-left:auto; padding:5px; border-radius:8px; color:var(--ink-soft); transition:.15s;
+}
+.qcard-head .qdel:hover{ background:rgba(209,70,95,.12); color:var(--raspberry) }
+.qcard-head .qdel.armed{ background:var(--raspberry); color:#fff }
+.qtype{ display:flex; gap:14px; flex-wrap:wrap; margin-top:10px }
+.qtype label{
+  display:inline-flex; align-items:center; gap:7px; font-size:.88rem;
+  font-weight:500; cursor:pointer; padding:5px 10px;
+  border:1.5px solid var(--line); border-radius:99px;
+}
+.qtype label:has(input:checked){ border-color:var(--ink); box-shadow:2px 2px 0 var(--sh1); font-weight:700 }
+.qtype input{ accent-color:var(--coral) }
+.qscale-labels{ display:none; gap:10px; margin-top:10px; flex-wrap:wrap }
+.qscale-labels.show{ display:flex }
+.qscale-labels .sl{ flex:1; min-width:160px }
+.qscale-labels .sl span{ display:block; font-size:.78rem; color:var(--ink-soft); margin-bottom:4px; font-weight:600 }
+.qscale-labels input{ padding:8px 10px; font-size:.9rem }
 
 /* Interruptor */
 .switch{ position:relative; display:inline-block; width:48px; height:27px; flex:none; cursor:pointer }
@@ -215,12 +280,13 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
   overflow:hidden; text-overflow:ellipsis; transition:.15s;
 }
 .qchip b{ font-family:var(--font-display); font-style:italic }
+.qchip .qchip-type{ font-size:.68rem; color:var(--ink-soft); border:1px solid var(--line); border-radius:99px; padding:1px 7px; flex:none }
 .qchip::before{ content:""; width:8px; height:8px; border-radius:50%; background:var(--line); flex:none }
 .qchip.st-waiting::before{ background:#C9C2B2 }
 .qchip.st-open::before{ background:var(--leaf) }
 .qchip.st-paused::before{ background:var(--mustard) }
 .qchip.st-closed::before{ background:var(--raspberry) }
-.qchip.active{ border-color:var(--ink); box-shadow:2px 2px 0 rgba(35,32,26,.85); font-weight:700 }
+.qchip.active{ border-color:var(--ink); box-shadow:2px 2px 0 var(--sh3); font-weight:700 }
 
 .stage{ flex:1; min-height:340px; padding:0 clamp(14px,3vw,28px) 16px; display:flex }
 
@@ -250,6 +316,10 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .word .w-in{ display:inline-block; animation:
   word-drop .7s cubic-bezier(.2,.7,.3,1.25) both,
   word-float 7s ease-in-out calc(var(--fd,1s) + .7s) infinite;
+}
+.word .w-star{
+  color:var(--mustard); font-size:.62em; vertical-align:super; margin-left:.15em;
+  -webkit-text-stroke:.5px var(--ink);
 }
 .word:not(.is-leaving):hover .w-in{
   text-decoration-line:underline; text-decoration-style:wavy; text-decoration-thickness:2px;
@@ -292,29 +362,28 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .res-table .rank{ font-family:var(--font-display); font-style:italic; color:var(--ink-soft); width:34px }
 .res-word{ display:inline-flex; align-items:center; gap:9px; font-weight:700 }
 .res-dot{ width:10px; height:10px; border-radius:3px; flex:none }
-.bar-cell{ width:26% }
+.res-votes{ color:var(--mustard); font-weight:700; white-space:nowrap }
+.bar-cell{ width:22% }
 .res-bar{ height:9px; border-radius:99px; min-width:2px }
 .res-del{ padding:6px; border-radius:8px; color:var(--ink-soft); transition:.15s }
 .res-del:hover{ background:rgba(209,70,95,.12); color:var(--raspberry) }
 .res-del.armed{ background:var(--raspberry); color:#fff }
 .res-empty{ padding:30px; text-align:center; color:var(--ink-soft) }
 
-/* ---------- Gráficos estadísticos ---------- */
+/* ---------- Gráficos ---------- */
 .charts-row{ padding:12px 18px 0 }
 .chart-area{ padding:12px 18px 6px; min-height:40px }
 .chart-note{ font-size:.8rem; color:var(--ink-soft); margin:4px 0 8px }
 
-/* Barras */
 .cbar{
   display:grid; grid-template-columns:minmax(90px,170px) 1fr 74px; gap:10px;
   align-items:center; margin-bottom:9px; font-size:.92rem;
 }
 .cbar-label{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-.cbar-track{ background:rgba(35,32,26,.07); border-radius:99px; height:20px; overflow:hidden }
+.cbar-track{ background:var(--track-bg); border-radius:99px; height:20px; overflow:hidden }
 .cbar-fill{ height:100%; border-radius:99px; width:0; transition:width .6s cubic-bezier(.22,.9,.3,1) }
 .cbar-val{ font-variant-numeric:tabular-nums; text-align:right; color:var(--ink-soft); font-size:.82rem }
 
-/* Puntos (cada punto = una respuesta) */
 .cdot{ margin-bottom:12px }
 .cdot-head{ display:flex; justify-content:space-between; gap:10px; font-size:.9rem; margin-bottom:4px }
 .cdot-head b{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
@@ -322,7 +391,6 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .cdot-dots{ display:flex; flex-wrap:wrap; gap:4px }
 .cdot-dots i{ width:11px; height:11px; border-radius:50%; display:block }
 
-/* Pastel (donut SVG) */
 .cdonut{ display:flex; align-items:center; gap:24px; flex-wrap:wrap; padding:6px 0 }
 .cdonut .dspace{ position:relative; flex:none }
 .cdonut svg{ display:block }
@@ -336,7 +404,20 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .dlegend-item{ display:flex; align-items:center; gap:8px; font-size:.88rem }
 .dlegend-item b{ margin-left:auto; font-variant-numeric:tabular-nums; color:var(--ink-soft); font-weight:500 }
 
-/* ---------- Consola de control ---------- */
+/* Escala: estadística y caja y bigotes */
+.scale-stats{
+  display:flex; gap:20px; flex-wrap:wrap; margin:4px 0 12px;
+  font-size:.92rem; color:var(--ink-soft);
+}
+.scale-stats b{ font-family:var(--font-display); font-size:1.15rem; color:var(--ink) }
+.scale-stats .ss{ display:flex; flex-direction:column; line-height:1.25 }
+.boxplot{ width:100%; max-width:640px; height:auto; color:var(--ink); margin:2px 0 8px }
+.scale-ends{
+  display:flex; justify-content:space-between; gap:12px;
+  font-size:.78rem; color:var(--ink-soft); margin-bottom:6px;
+}
+
+/* ---------- Consola ---------- */
 .console{
   display:flex; align-items:center; gap:8px; flex-wrap:wrap;
   padding:12px clamp(14px,3vw,28px) calc(12px + env(safe-area-inset-bottom));
@@ -344,7 +425,7 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 }
 .console-sep{ width:1.5px; height:26px; background:var(--line); margin:0 4px }
 
-/* ---------- Join del alumno ---------- */
+/* ---------- Join ---------- */
 .view-join{ justify-content:center; align-items:center; padding:20px }
 .panel-join{ width:min(430px,94vw); margin:0; text-align:center; display:flex; flex-direction:column; gap:16px }
 .panel-join .brand{ justify-content:center }
@@ -363,7 +444,7 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .student-card{
   width:min(520px,100%); display:flex; flex-direction:column; gap:18px;
   background:var(--paper-2); border:var(--border); border-radius:20px;
-  box-shadow:8px 8px 0 rgba(35,32,26,.1); padding:clamp(18px,4vw,30px);
+  box-shadow:8px 8px 0 var(--sh5); padding:clamp(18px,4vw,30px);
 }
 .student-top{ display:flex; align-items:center; gap:12px; flex-wrap:wrap }
 .student-activity{
@@ -378,6 +459,37 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .answer-form{ display:flex; gap:10px }
 .answer-form input{ flex:1; min-width:0; font-size:1.1rem; padding:14px }
 .remaining-note{ font-size:.85rem; color:var(--ink-soft); margin-top:8px; text-align:right }
+
+/* Escala del alumno */
+.scale-row{ display:flex; gap:10px }
+.scale-btn{
+  flex:1; padding:18px 0; font-size:1.35rem; font-weight:700;
+  border:var(--border); border-radius:14px; background:var(--white);
+  box-shadow:3px 3px 0 var(--sh1); transition:.15s; font-variant-numeric:tabular-nums;
+}
+.scale-btn:hover{ transform:translate(-1px,-1px); box-shadow:4px 4px 0 var(--sh2) }
+.scale-btn:active{ transform:translate(1px,1px); box-shadow:1px 1px 0 var(--sh2) }
+.scale-ends-stu{
+  display:flex; justify-content:space-between; gap:10px;
+  font-size:.8rem; color:var(--ink-soft); margin-top:8px;
+}
+
+/* Votación del alumno */
+.vote-box{ margin-top:18px; border-top:1px dashed var(--line); padding-top:14px }
+.vote-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px }
+.vote-chip{
+  border:var(--border); background:var(--white); border-radius:99px;
+  padding:7px 15px; font-weight:600; font-size:.95rem;
+  box-shadow:2px 2px 0 var(--sh1); transition:.15s;
+}
+.vote-chip:hover{ transform:translate(-1px,-1px); box-shadow:3px 3px 0 var(--sh2) }
+.vote-chip:disabled{ opacity:.45; pointer-events:none }
+.my-votes{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px }
+.my-votes span{
+  border:1.5px solid var(--mustard); background:var(--white);
+  border-radius:99px; padding:4px 12px; font-size:.85rem; font-weight:600;
+}
+
 .sent-box{ display:flex; flex-direction:column; align-items:center; gap:12px; text-align:center; padding:18px 6px; animation:fade-up .35s ease }
 .sent-check{ width:58px; height:58px; color:var(--leaf) }
 .sent-check circle{ stroke-dasharray:170; stroke-dashoffset:170; animation:dash .6s ease forwards }
@@ -389,15 +501,16 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .my-words span{ border:1.5px solid var(--line); background:var(--white); border-radius:99px; padding:4px 12px; font-size:.85rem; font-weight:500 }
 .student-meta{ text-align:center; color:var(--ink-soft); font-size:.88rem }
 
-/* ---------- Tooltip de palabra ---------- */
+/* ---------- Tooltip ---------- */
 #word-tooltip{
   position:fixed; z-index:60; width:max-content; max-width:260px;
   background:var(--white); border:var(--border); border-radius:12px;
-  box-shadow:5px 5px 0 rgba(35,32,26,.85); padding:12px 14px;
+  box-shadow:5px 5px 0 var(--sh3); padding:12px 14px;
   animation:fade-up .18s ease;
 }
 .wt-word{ font-family:var(--font-display); font-weight:700; font-size:1.1rem; margin-bottom:2px }
 .wt-stats{ font-size:.88rem; color:var(--ink-soft) }
+.wt-votes{ font-size:.88rem; color:var(--mustard); font-weight:700 }
 .wt-authors{ font-size:.8rem; color:var(--ink-soft); margin-top:6px; border-top:1px dashed var(--line); padding-top:6px }
 .wt-delete{ display:inline-flex; align-items:center; gap:6px; margin-top:10px; font-size:.82rem; color:var(--raspberry); text-decoration:underline; text-underline-offset:3px }
 .wt-delete:hover{ color:#A93253 }
@@ -410,18 +523,18 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 }
 .toast{
   background:var(--ink); color:var(--paper); border-radius:12px; padding:10px 18px;
-  font-size:.92rem; box-shadow:4px 4px 0 rgba(35,32,26,.3);
+  font-size:.92rem; box-shadow:4px 4px 0 var(--sh4);
   max-width:90vw; animation:fade-up .25s ease; transition:.3s;
 }
 .toast.warn{ background:var(--raspberry) }
 .toast.gone{ opacity:0; transform:translateY(8px) }
 
-/* ---------- Impresión / PDF ---------- */
+/* ---------- Impresión ---------- */
 #print-area{ display:none }
 @page{ margin:14mm }
 @media print{
   body{ background:#fff }
-  #bg-words,.app,#toasts,#word-tooltip{ display:none!important }
+  #bg-words,#rain,.app,#toasts,#word-tooltip,.theme-toggle{ display:none!important }
   #print-area{ display:block }
   .pa-title{ font-family:var(--font-display); font-size:22pt; font-weight:700 }
   .pa-meta{ color:#555; margin:4pt 0 14pt; font-size:10pt }
@@ -443,11 +556,13 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
   .bar-cell{ width:16% }
   .home-hero h1{ font-size:clamp(2.3rem,11vw,3.2rem) }
   .cbar{ grid-template-columns:minmax(70px,110px) 1fr 60px }
+  .scale-row{ gap:7px }
+  .scale-btn{ padding:14px 0; font-size:1.15rem }
 }
 
-/* ============================================================
-   PAQUETE AULA · QR + Proyector
-============================================================ */
+:root[data-theme="dark"] #qr-box{ background:#FFFFFF }
+
+/* ---------- QR + Proyector ---------- */
 #qr-overlay{
   position:fixed; inset:0; z-index:70; display:flex; align-items:center; justify-content:center;
   background:rgba(35,32,26,.45); backdrop-filter:blur(3px); padding:20px;
@@ -455,7 +570,7 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .qr-card{
   position:relative; display:flex; flex-direction:column; align-items:center; gap:10px;
   width:min(400px,94vw); background:var(--paper-2); border:var(--border); border-radius:20px;
-  box-shadow:10px 10px 0 rgba(35,32,26,.85); padding:26px 24px; text-align:center;
+  box-shadow:10px 10px 0 var(--sh3); padding:26px 24px; text-align:center;
 }
 .qr-close{ position:absolute; top:12px; right:12px }
 .qr-hint{ font-size:.9rem; color:var(--ink-soft) }
@@ -469,7 +584,6 @@ textarea{ resize:vertical; min-height:44px; line-height:1.55 }
 .qr-code{ font-family:var(--font-display); font-weight:700; font-size:2rem; letter-spacing:.14em }
 .qr-url{ font-size:.75rem; color:var(--ink-soft); word-break:break-all }
 
-/* ---------- Modo proyector ---------- */
 .projector-ui{ display:none }
 body.projector{ overflow:hidden }
 body.projector .stage{ position:fixed; inset:0; z-index:55; padding:0; background:var(--paper) }
@@ -485,7 +599,7 @@ body.projector .projector-ui{
   font-family:var(--font-display); font-weight:600; letter-spacing:-.005em;
   font-size:clamp(1.4rem,3.4vw,2.6rem); line-height:1.12; max-width:32ch;
   background:rgba(252,250,244,.92); border:var(--border); border-radius:14px;
-  padding:12px 18px; box-shadow:4px 4px 0 rgba(35,32,26,.15);
+  padding:12px 18px; box-shadow:4px 4px 0 var(--sh6);
 }
 .pj-corner{ display:flex; align-items:center; gap:10px; pointer-events:auto }
 .pj-count{
