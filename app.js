@@ -374,12 +374,12 @@ function playDrop(){
   const f0 = 650 + Math.random() * 550;
   o.type = 'sine';
   o.frequency.setValueAtTime(f0, t);
-  o.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.12);
+  o.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.18);
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+  g.gain.exponentialRampToValueAtTime(0.28, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
   o.connect(g); g.connect(audioCtx.destination);
-  o.start(t); o.stop(t + 0.2);
+  o.start(t); o.stop(t + 0.35);
 }
 
 function renderSoundBtn(){
