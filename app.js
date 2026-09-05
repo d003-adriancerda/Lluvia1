@@ -2,25 +2,30 @@
 
 /* ============================================================
    CHUBASCO · Tormenta de palabras para el aula
-   VERSIÓN 2 · MULTIUSUARIO (Firebase) + FASE 1
-   (gráficos estadísticos, palabras bloqueadas, historial)
+   VERSIÓN FINAL: V2 multiusuario + Fase 1 + Fase 2 + Fase 3A
+   (tipos de pregunta, escala 1-5 con boxplot, votaciones,
+   cerradura de profesor con profKey)
    ============================================================ */
 
 /* ============================================================
    1 · CONSTANTES Y UTILIDADES
 ============================================================ */
-const T_KEY = 'chubasco:teacher';
-const S_KEY = 'chubasco:student';
-const H_KEY = 'chubasco:history';   // historial de sesiones del profesor
+const T_KEY     = 'chubasco:teacher';
+const S_KEY     = 'chubasco:student';
+const H_KEY     = 'chubasco:history';
+const THEME_KEY = 'chubasco:theme';
+const SOUND_KEY = 'chubasco:sound';
 
 const MAX_LEN    = 40;
 const COOLDOWN   = 1200;
 const MAX_UNIQUE = 60;
 const MAX_Q      = 10;
+const VOTES_PER_STUDENT = 3;
 
 const PALETTE = ['#FF5D3A','#0E9594','#F3A712','#2E6F95','#D1465F','#6FA540'];
 
 const $ = (sel, ctx = document) => ctx.querySelector(sel);
+const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
 
 function el(tag, cls, text){
   const n = document.createElement(tag);
@@ -44,6 +49,7 @@ function hashString(s){
 const colorOf = key => PALETTE[hashString(key) % PALETTE.length];
 
 const pctStr = p => p.toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' %';
+const numStr = n => n.toLocaleString('es-ES', { maximumFractionDigits: 1 });
 
 const escHTML = s => String(s).replace(/[&<>"]/g, c =>
   ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
@@ -93,7 +99,14 @@ const ICONS = {
   chart: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 20v-7M12 20V5M18 20v-10"/></svg>'
 };
 
-const TRASH_SVG = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>';
+const ICON_SOUND = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>';
+const ICON_MUTE  = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>';
+const ICON_MOON  = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
+const ICON_SUN   = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const ICON_STAR  = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 14.9 8.6 21.5 9.5 16.7 14.1 17.9 20.7 12 17.6 6.1 20.7 7.3 14.1 2.5 9.5 9.1 8.6z"/></svg>';
+const ICON_TRASH_SM = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>';
+
+const TRASH_SVG = ICON_TRASH_SM;
 const SEND_SVG  = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7z"/></svg>';
 
 const SVG_CLOCK  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>';
@@ -103,7 +116,6 @@ const SVG_CLOUD  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 
 /* ============================================================
    3 · STORE FIREBASE
-   (Configuración ya pegada con los datos del proyecto lluvia1-925b4)
 ============================================================ */
 const firebaseConfig = {
   apiKey:            "AIzaSyD4z8oA77TdBu54z0vdCt7PbM011EtoNGI",
@@ -128,30 +140,33 @@ if (FIREBASE_OK){
 let session   = null;
 let questions = [];
 let responses = [];
+let votes     = [];
 let sessionStatus = 'idle';
-let unsub1 = null, unsub2 = null, unsub3 = null;
+let unsub = [null, null, null, null];
 
 function stopWatching(){
-  [unsub1, unsub2, unsub3].forEach(u => { try{ u && u(); }catch(e){} });
-  unsub1 = unsub2 = unsub3 = null;
+  unsub.forEach(u => { try{ u && u(); }catch(e){} });
+  unsub = [null, null, null, null];
 }
 
-function attachResponses(){
+/** Reparte respuestas y votos dentro de sus preguntas (filtra borrados). */
+function attachAll(){
   questions.forEach(q => {
     q.responses = responses
-      .filter(r => r.qid === q.id)
+      .filter(r => r.qid === q.id && !r.deleted)
       .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    q.votesList = votes.filter(v => v.qid === q.id && !v.deleted);
   });
 }
 
 function watchSession(code){
   stopWatching();
   sessionStatus = 'loading';
-  session = null; questions = []; responses = [];
+  session = null; questions = []; responses = []; votes = [];
 
   const root = fdb.collection('sessions').doc(code);
 
-  unsub1 = root.onSnapshot(snap => {
+  unsub[0] = root.onSnapshot(snap => {
     if (!snap.exists){ sessionStatus = 'missing'; session = null; refreshCurrentView(); return; }
     sessionStatus = 'live';
     session = Object.assign({ code }, snap.data());
@@ -161,15 +176,22 @@ function watchSession(code){
     toast('Error de conexión con Firebase', 'warn');
   });
 
-  unsub2 = root.collection('questions').orderBy('order').onSnapshot(snap => {
-    questions = snap.docs.map(d => Object.assign({ id: d.id, responses: [] }, d.data()));
-    attachResponses();
+  unsub[1] = root.collection('questions').orderBy('order').onSnapshot(snap => {
+    questions = snap.docs.map(d => Object.assign({ id: d.id, responses: [], votesList: [] }, d.data()));
+    if (!questions[0] || !questions[0].type) questions.forEach(q => { if(!q.type) q.type = 'word'; });
+    attachAll();
     refreshCurrentView();
   });
 
-  unsub3 = fdb.collection('responses').where('code', '==', code).onSnapshot(snap => {
+  unsub[2] = fdb.collection('responses').where('code', '==', code).onSnapshot(snap => {
     responses = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
-    attachResponses();
+    attachAll();
+    refreshCurrentView();
+  });
+
+  unsub[3] = fdb.collection('votes').where('code', '==', code).onSnapshot(snap => {
+    votes = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    attachAll();
     refreshCurrentView();
   });
 }
@@ -183,6 +205,29 @@ function currentQ(){
 function sessionView(){
   return Object.assign({}, session, { questions });
 }
+
+/* --- Cerradura de profesor --- */
+function generateProfKey(){
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let k = '';
+  for (let i = 0; i < 8; i++) k += A[Math.floor(Math.random() * A.length)];
+  return k;
+}
+const profKeyFor = code => {
+  try{ return sessionStorage.getItem('chubasco:profkey:' + code) || null; }catch(e){ return null; }
+};
+function rememberProfKey(code, key){
+  try{ sessionStorage.setItem('chubasco:profkey:' + code, key); }catch(e){}
+}
+
+/* --- Escrituras (incluyen profKey si el profesor la tiene) --- */
+function withKey(code, patch){
+  const k = profKeyFor(code);
+  if (k) patch.profKey = k;
+  return patch;
+}
+const updateSession  = (code, patch)      => fdb.collection('sessions').doc(code).set(withKey(code, patch), { merge: true });
+const updateQuestion = (code, qid, patch) => fdb.collection('sessions').doc(code).collection('questions').doc(qid).set(withKey(code, patch), { merge: true });
 
 async function generateCode(){
   const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -198,53 +243,64 @@ async function generateCode(){
 }
 
 async function createSession(data){
+  const profKey = generateProfKey();
   const root = fdb.collection('sessions').doc(data.code);
   const batch = fdb.batch();
   batch.set(root, {
     title: data.title,
-    settings: data.settings,
+    settings: Object.assign({ maxVotes: VOTES_PER_STUDENT }, data.settings),
     current: 0,
     ended: false,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    profKey
   });
   data.questions.forEach((q, i) => {
-    batch.set(root.collection('questions').doc(q.id), { text: q.text, status: 'waiting', order: i });
+    const doc = { text: q.text, type: q.type, status: 'waiting', order: i };
+    if (q.type === 'scale'){
+      if (q.scaleMin) doc.scaleMin = q.scaleMin;
+      if (q.scaleMax) doc.scaleMax = q.scaleMax;
+    }
+    batch.set(root.collection('questions').doc(q.id), doc);
   });
   await batch.commit();
+  rememberProfKey(data.code, profKey);
 }
-
-const updateSession  = (code, patch)      => fdb.collection('sessions').doc(code).set(patch, { merge: true });
-const updateQuestion = (code, qid, patch) => fdb.collection('sessions').doc(code).collection('questions').doc(qid).set(patch, { merge: true });
 
 function addResponse(code, qid, r){
   return fdb.collection('responses').add(Object.assign({ code, qid }, r));
 }
+function addVote(code, qid, v){
+  return fdb.collection('votes').add(Object.assign({ code, qid }, v));
+}
 
-async function deleteResponsesByKey(code, qid, key){
+/** Borrado suave (soft delete): las reglas prohíben delete duro. */
+async function softDeleteResponsesByKey(code, qid, key){
   const snap = await fdb.collection('responses').where('code', '==', code).get();
   const batch = fdb.batch();
   let n = 0;
   snap.forEach(d => {
     const r = d.data();
-    if (r.qid === qid && r.key === key){ batch.delete(d.ref); n++; }
+    if (r.qid === qid && r.key === key && !r.deleted){
+      batch.update(d.ref, withKey(code, { deleted: true })); n++;
+    }
   });
   if (n) await batch.commit();
   return n;
 }
 
-async function clearResponses(code, qid){
-  const snap = await fdb.collection('responses').where('code', '==', code).get();
+async function softClearQuestionData(code, qid){
+  const rs = await fdb.collection('responses').where('code', '==', code).get();
+  const vs = await fdb.collection('votes').where('code', '==', code).get();
   const batch = fdb.batch();
   let n = 0;
-  snap.forEach(d => {
-    if (d.data().qid === qid){ batch.delete(d.ref); n++; }
-  });
+  rs.forEach(d => { if (d.data().qid === qid && !d.data().deleted){ batch.update(d.ref, withKey(code, { deleted: true })); n++; } });
+  vs.forEach(d => { if (d.data().qid === qid && !d.data().deleted){ batch.update(d.ref, withKey(code, { deleted: true })); n++; } });
   if (n) await batch.commit();
   return n;
 }
 
 /* ============================================================
-   4 · ROUTER DE VISTAS Y ESTADO GLOBAL
+   4 · ROUTER Y ESTADO GLOBAL
 ============================================================ */
 const VIEWS = ['home','setup','live','join','student'];
 let currentView = 'home';
@@ -270,6 +326,128 @@ function refreshCurrentView(){
 }
 
 /* ============================================================
+   4bis · TEMA Y SONIDO
+============================================================ */
+function currentTheme(){
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+function applyTheme(t){
+  document.documentElement.dataset.theme = t;
+  const ic = (t === 'dark') ? ICON_SUN : ICON_MOON;
+  const t1 = $('#theme-toggle');   if (t1) t1.innerHTML = ic;
+  const t2 = $('#btn-theme-live'); if (t2) t2.innerHTML = ic;
+}
+function toggleTheme(){
+  applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+  try{ localStorage.setItem(THEME_KEY, currentTheme()); }catch(e){}
+}
+ $('#theme-toggle').addEventListener('click', toggleTheme);
+ $('#btn-theme-live').addEventListener('click', toggleTheme);
+
+let audioCtx = null;
+let soundOn = true;
+try{ soundOn = localStorage.getItem(SOUND_KEY) !== 'off'; }catch(e){}
+
+function ensureAudio(){
+  if (!audioCtx){
+    try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){}
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+document.addEventListener('pointerdown', ensureAudio);
+
+let lastDropTs = 0;
+function playDrop(){
+  if (!soundOn) return;
+  ensureAudio();
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const now = performance.now();
+  if (now - lastDropTs < 80) return;
+  lastDropTs = now;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  const f0 = 650 + Math.random() * 550;
+  o.type = 'sine';
+  o.frequency.setValueAtTime(f0, t);
+  o.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.12);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t); o.stop(t + 0.2);
+}
+
+function renderSoundBtn(){
+  const b = $('#btn-sound');
+  if (!b) return;
+  b.innerHTML = soundOn ? ICON_SOUND : ICON_MUTE;
+  b.title = soundOn ? 'Desactivar sonido de gotas' : 'Activar sonido de gotas';
+}
+ $('#btn-sound').addEventListener('click', () => {
+  soundOn = !soundOn;
+  try{ localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); }catch(e){}
+  if (soundOn){ ensureAudio(); playDrop(); }
+  renderSoundBtn();
+});
+
+/* ============================================================
+   4ter · LLUVIA AMBIENTAL
+============================================================ */
+function startRain(){
+  const cv = $('#rain');
+  if (!cv) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, drops = [];
+
+  function newDrop(fromTop){
+    return {
+      x: Math.random() * W,
+      y: fromTop ? -20 : Math.random() * H,
+      l: 10 + Math.random() * 18,
+      s: 260 + Math.random() * 320,
+      a: 0.10 + Math.random() * 0.14
+    };
+  }
+  function resize(){
+    W = cv.width = innerWidth;
+    H = cv.height = innerHeight;
+    drops = Array.from({ length: Math.max(30, Math.round(W / 28)) }, () => newDrop(false));
+  }
+
+  let last = performance.now();
+  function frame(t){
+    if (document.hidden){ last = t; requestAnimationFrame(frame); return; }
+    const dt = Math.min((t - last) / 1000, 0.05); last = t;
+    const dark = currentTheme() === 'dark';
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = dark ? 'rgba(240,234,224,1)' : 'rgba(35,32,26,1)';
+
+    for (const d of drops){
+      d.y += d.s * dt;
+      d.x += d.s * dt * 0.08;
+      if (d.y > H + 30) Object.assign(d, newDrop(true));
+      ctx.globalAlpha = d.a;
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(d.x - d.l * 0.08, d.y - d.l);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  addEventListener('resize', resize);
+  requestAnimationFrame(frame);
+}
+
+/* ============================================================
    5 · FONDO DECORATIVO
 ============================================================ */
 function buildBackgroundWords(){
@@ -289,26 +467,108 @@ function buildBackgroundWords(){
 }
 
 /* ============================================================
-   6 · CONFIGURACIÓN DEL PROFESOR
+   6 · EDITOR DE PREGUNTAS Y CREACIÓN DE SESIÓN
 ============================================================ */
-function readSetupQuestions(){
-  return $('#setup-questions').value.split('\n')
-    .map(l => l.replace(/\s+/g, ' ').trim().slice(0, 140))
-    .filter(Boolean)
-    .slice(0, MAX_Q);
+function updateQCount(){
+  const n = $$('#qcards .qcard').length;
+  $('#q-count').textContent = n + (n === 1 ? ' pregunta' : ' preguntas');
+  $('#btn-add-q').disabled = (n >= MAX_Q);
 }
 
- $('#setup-questions').addEventListener('input', () => {
-  const n = readSetupQuestions().length;
-  $('#q-count').textContent = n + (n === 1 ? ' pregunta' : ' preguntas');
+/** Crea una tarjeta de pregunta (texto + tipo + etiquetas de escala). */
+function makeQCard(data = {}){
+  const card = el('div', 'qcard');
+  const name = 'qt-' + uid();
+
+  const head = el('div', 'qcard-head');
+  const idx = $$('#qcards .qcard').length + 1;
+  head.append(el('b', '', 'Pregunta ' + idx));
+  const del = el('button', 'qdel');
+  del.type = 'button';
+  del.title = 'Quitar pregunta';
+  del.innerHTML = TRASH_SVG;
+  del.addEventListener('click', () => {
+    if (del.dataset.armed){ card.remove(); updateQCount(); renumberCards(); }
+    else {
+      del.dataset.armed = '1'; del.classList.add('armed');
+      setTimeout(() => { delete del.dataset.armed; del.classList.remove('armed'); }, 2200);
+    }
+  });
+  head.append(del);
+  card.append(head);
+
+  const input = el('input');
+  input.type = 'text';
+  input.maxLength = 140;
+  input.placeholder = 'Escribe la pregunta…';
+  input.value = data.text || '';
+  input.className = 'q-input';
+  card.append(input);
+
+  const types = el('div', 'qtype');
+  const labW = el('label');
+  const rW = el('input'); rW.type = 'radio'; rW.name = name; rW.value = 'word';
+  if ((data.type || 'word') === 'word') rW.checked = true;
+  labW.append(rW, document.createTextNode('Palabra'));
+  const labS = el('label');
+  const rS = el('input'); rS.type = 'radio'; rS.name = name; rS.value = 'scale';
+  if (data.type === 'scale') rS.checked = true;
+  labS.append(rS, document.createTextNode('Escala 1–5'));
+  types.append(labW, labS);
+  card.append(types);
+
+  const sl = el('div', 'qscale-labels' + (data.type === 'scale' ? ' show' : ''));
+  const s1 = el('div', 'sl');
+  s1.append(el('span', '', 'El 1 significa (opcional)'));
+  const i1 = el('input'); i1.type = 'text'; i1.maxLength = 30; i1.value = data.scaleMin || '';
+  i1.className = 'q-smin';
+  s1.append(i1);
+  const s5 = el('div', 'sl');
+  s5.append(el('span', '', 'El 5 significa (opcional)'));
+  const i5 = el('input'); i5.type = 'text'; i5.maxLength = 30; i5.value = data.scaleMax || '';
+  i5.className = 'q-smax';
+  s5.append(i5);
+  sl.append(s1, s5);
+  card.append(sl);
+
+  rW.addEventListener('change', () => sl.classList.toggle('show', false));
+  rS.addEventListener('change', () => sl.classList.toggle('show', true));
+  input.addEventListener('input', () => {}); // reservado
+
+  return card;
+}
+
+function renumberCards(){
+  $$('#qcards .qcard').forEach((c, i) => {
+    const b = c.querySelector('.qcard-head b');
+    if (b) b.textContent = 'Pregunta ' + (i + 1);
+  });
+}
+
+/** Lee las tarjetas y devuelve la lista de preguntas válidas. */
+function readQuestionCards(){
+  return $$('#qcards .qcard').map(c => ({
+    text: (c.querySelector('.q-input').value || '').replace(/\s+/g, ' ').trim().slice(0, 140),
+    type: c.querySelector('input[type=radio]:checked').value,
+    scaleMin: (c.querySelector('.q-smin').value || '').trim().slice(0, 30),
+    scaleMax: (c.querySelector('.q-smax').value || '').trim().slice(0, 30)
+  })).filter(q => q.text);
+}
+
+ $('#btn-add-q').addEventListener('click', () => {
+  if ($$('#qcards .qcard').length >= MAX_Q) return;
+  $('#qcards').append(makeQCard());
+  updateQCount();
+  const cards = $$('#qcards .qcard');
+  cards[cards.length - 1].querySelector('.q-input').focus();
 });
 
  $('#setup-form').addEventListener('submit', async e => {
   e.preventDefault();
   if (!FIREBASE_OK){ toast('Primero configura Firebase en app.js', 'warn'); return; }
 
-  const questionsInput = readSetupQuestions();
-  if (!questionsInput.length){ toast('Escribe al menos una pregunta', 'warn'); return; }
+  const qs = readQuestionCards();
+  if (!qs.length){ toast('Escribe al menos una pregunta', 'warn'); return; }
 
   const title  = ($('#setup-title').value.replace(/\s+/g, ' ').trim() || 'Actividad sin título').slice(0, 60);
   const maxPer = clamp(parseInt($('#setup-max').value, 10) || 3, 1, 10);
@@ -321,7 +581,6 @@ function readSetupQuestions(){
     anonymous     : $('#setup-anon').checked,
     blocked
   };
-  const qs = questionsInput.map(t => ({ id: uid(), text: t }));
 
   const submitBtn = $('#setup-form button[type=submit]');
   submitBtn.disabled = true;
@@ -332,7 +591,7 @@ function readSetupQuestions(){
     teacherCode = code;
     sessionStorage.setItem(T_KEY, teacherCode);
     liveState.mode = 'storm';
-    addHistory(code, title);
+    addHistory(code, title, profKeyFor(code));
     watchSession(code);
     showView('live');
     renderLive();
@@ -345,7 +604,12 @@ function readSetupQuestions(){
   }
 });
 
- $('#btn-go-setup').addEventListener('click', () => showView('setup'));
+ $('#btn-go-setup').addEventListener('click', () => {
+  showView('setup');
+  if (!$$('#qcards .qcard').length) $('#qcards').append(makeQCard());
+  updateQCount();
+  setTimeout(() => $('#setup-title').focus(), 60);
+});
  $('#btn-setup-back').addEventListener('click', () => showView('home'));
  $('#btn-go-join').addEventListener('click', () => {
   showView('join'); resetJoin();
@@ -361,8 +625,7 @@ function readSetupQuestions(){
 });
 
 /* ============================================================
-   6bis · HISTORIAL DE SESIONES DEL PROFESOR
-   (lista local en este navegador; los datos viven en Firebase)
+   6bis · HISTORIAL DE SESIONES
 ============================================================ */
 function loadHistory(){
   try{ return JSON.parse(localStorage.getItem(H_KEY)) || []; }catch(e){ return []; }
@@ -370,9 +633,9 @@ function loadHistory(){
 function saveHistoryList(list){
   try{ localStorage.setItem(H_KEY, JSON.stringify(list.slice(0, 20))); }catch(e){}
 }
-function addHistory(code, title){
+function addHistory(code, title, profKey){
   const list = loadHistory().filter(h => h.code !== code);
-  list.unshift({ code, title, ts: Date.now() });
+  list.unshift(Object.assign({ code, title, ts: Date.now() }, profKey ? { profKey } : {}));
   saveHistoryList(list);
 }
 function removeHistory(code){
@@ -396,7 +659,7 @@ function renderHistory(){
 
     const open = el('button', 'btn btn-ghost btn-sm', 'Abrir');
     open.type = 'button';
-    open.addEventListener('click', () => openHistorySession(h.code));
+    open.addEventListener('click', () => openHistorySession(h));
 
     const del = el('button', 'btn btn-ghost btn-sm', 'Quitar');
     del.type = 'button';
@@ -408,12 +671,13 @@ function renderHistory(){
   });
 }
 
-function openHistorySession(code){
+function openHistorySession(h){
   if (!FIREBASE_OK) return;
-  teacherCode = code;
-  sessionStorage.setItem(T_KEY, code);
+  if (h.profKey) rememberProfKey(h.code, h.profKey);
+  teacherCode = h.code;
+  sessionStorage.setItem(T_KEY, h.code);
   liveState.mode = 'storm';
-  watchSession(code);
+  watchSession(h.code);
   showView('live');
   renderLive();
 }
@@ -442,6 +706,8 @@ function armTwoStep(btn, fn){
   }
 }
 
+let lastAnsQId = null, lastAnsTotal = 0;
+
 function renderLive(){
   if (!teacherCode) return;
 
@@ -460,6 +726,7 @@ function renderLive(){
   const s = session;
   s.current = clamp(s.current, 0, questions.length - 1);
   const q = questions[s.current];
+  const isScale = (q.type === 'scale');
 
   $('#live-title').textContent = s.title;
   $('#live-code-text').textContent = s.code;
@@ -475,6 +742,21 @@ function renderLive(){
   $('#stat-people').textContent = new Set(q.responses.map(r => r.authorId)).size;
   animateNumber($('#stat-answers'), q.responses.length);
 
+  // Sonido de gotas
+  if (liveState.mode === 'storm' && !document.hidden){
+    if (lastAnsQId !== q.id){
+      lastAnsQId = q.id;
+      lastAnsTotal = q.responses.length;
+    } else if (q.responses.length > lastAnsTotal){
+      const k = Math.min(q.responses.length - lastAnsTotal, 3);
+      for (let i = 0; i < k; i++) setTimeout(playDrop, i * 90);
+      lastAnsTotal = q.responses.length;
+    } else if (q.responses.length < lastAnsTotal){
+      lastAnsTotal = q.responses.length;
+    }
+  }
+
+  // Navegación
   const nav = $('#qnav');
   nav.textContent = '';
   questions.forEach((qq, i) => {
@@ -482,7 +764,8 @@ function renderLive(){
     b.type = 'button';
     b.title = qq.text;
     b.append(el('b', '', String(i + 1)));
-    b.append(document.createTextNode(qq.text.length > 24 ? qq.text.slice(0, 24) + '…' : qq.text));
+    b.append(el('span', 'qchip-type', qq.type === 'scale' ? '1-5' : 'palabra'));
+    b.append(document.createTextNode(qq.text.length > 20 ? qq.text.slice(0, 20) + '…' : qq.text));
     b.addEventListener('click', () => {
       liveState.mode = 'storm';
       updateSession(teacherCode, { current: i });
@@ -490,6 +773,7 @@ function renderLive(){
     nav.append(b);
   });
 
+  // Consola
   const tbtn = $('#btn-toggle-status');
   if (q.status === 'waiting'){ tbtn.innerHTML = ICONS.play  + ' Abrir pregunta'; tbtn.disabled = false; }
   else if (q.status === 'open'){ tbtn.innerHTML = ICONS.pause + ' Pausar';       tbtn.disabled = false; }
@@ -498,7 +782,15 @@ function renderLive(){
 
   $('#btn-close-q').disabled = (q.status === 'waiting' || q.status === 'closed');
   $('#btn-next-q').disabled  = (s.current >= questions.length - 1);
-  $('#btn-demo').disabled    = (q.status !== 'open');
+  $('#btn-demo').disabled    = (q.status !== 'open' || isScale);
+
+  // Botón de votación: solo preguntas de palabra
+  const vbtn = $('#btn-vote');
+  vbtn.hidden = isScale;
+  vbtn.disabled = isScale;
+  vbtn.classList.toggle('voting-on', !!q.voting);
+  vbtn.innerHTML = ICON_STAR + (q.voting ? ' Votación activa' : ' Votación');
+
   $('#btn-view-results').innerHTML = ICONS.chart + ' ' + (liveState.mode === 'storm' ? 'Resultados' : 'Ver tormenta');
 
   const stormOn = (liveState.mode === 'storm');
@@ -550,8 +842,8 @@ function animateNumber(elm, to){
  $('#btn-reset-q').addEventListener('click', e => armTwoStep(e.currentTarget, async () => {
   const q = currentQ();
   if (!q) return;
-  await clearResponses(teacherCode, q.id);
-  await updateQuestion(teacherCode, q.id, { status: 'waiting' });
+  await softClearQuestionData(teacherCode, q.id);
+  await updateQuestion(teacherCode, q.id, { status: 'waiting', voting: false });
   toast('Pregunta reiniciada');
 }));
 
@@ -562,11 +854,22 @@ function animateNumber(elm, to){
  $('#sort-freq').addEventListener('click',  () => { liveState.sort = 'freq';  renderLive(); });
  $('#sort-alpha').addEventListener('click', () => { liveState.sort = 'alpha'; renderLive(); });
 
+/* Activar/desactivar votación de palabras */
+ $('#btn-vote').addEventListener('click', () => {
+  const q = currentQ();
+  if (!q || q.type === 'scale') return;
+  updateQuestion(teacherCode, q.id, { voting: !q.voting });
+  toast(q.voting ? 'Votación desactivada' : 'Votación activada: tus alumnos ya pueden votar');
+});
+
  $('#btn-end').addEventListener('click', e => armTwoStep(e.currentTarget, async () => {
   const root = fdb.collection('sessions').doc(teacherCode);
+  const k = profKeyFor(teacherCode);
   const batch = fdb.batch();
   questions.forEach(q => batch.update(root.collection('questions').doc(q.id), { status: 'closed' }));
-  batch.update(root, { ended: true });
+  const endPatch = { ended: true };
+  if (k) endPatch.profKey = k;
+  batch.update(root, endPatch);
   await batch.commit();
   toast('Sesión finalizada');
 }));
@@ -584,6 +887,10 @@ function animateNumber(elm, to){
 /* ============================================================
    8 · LA TORMENTA DE PALABRAS
 ============================================================ */
+/**
+ * Agrupa respuestas por clave y añade los votos recibidos
+ * (solo cuentan los votos de palabras que aún existen).
+ */
 function computeWords(q){
   const groups = new Map();
   for (const r of q.responses){
@@ -592,10 +899,12 @@ function computeWords(q){
     g.count++;
     g.variants.set(r.text, (g.variants.get(r.text) || 0) + 1);
   }
+  const vlist = q.votesList || [];
   const words = [...groups.values()].map(g => {
     let text = g.key, best = 0;
     for (const [v, n] of g.variants){ if (n > best){ best = n; text = v; } }
-    return { key: g.key, text, count: g.count };
+    const v = vlist.filter(x => x.key === g.key).length;
+    return { key: g.key, text, count: g.count, votes: v };
   });
   const total = q.responses.length || 1;
   words.forEach(w => { w.pct = w.count / total * 100; });
@@ -692,17 +1001,21 @@ class WordStorm{
       if (isNew){
         const b = el('button', 'word');
         b.type = 'button';
-        const inner = el('span', 'w-in', w.text);
+        const inner = el('span', 'w-in');
         inner.style.setProperty('--fd', (Math.random() * 3).toFixed(2) + 's');
+        const star = el('span', 'w-star');
+        inner.append(star);
         b.append(inner);
         b.style.color = colorOf(w.key);
         b.addEventListener('click', () => onStormWordClick(w.key, b));
         c.append(b);
-        rec = { el: b, inner };
+        rec = { el: b, inner, star };
         this.els.set(w.key, rec);
       }
       rec.el.style.fontSize = fontSize + 'px';
-      rec.inner.textContent = w.text;
+      // El texto va primero; la estrella (si hay votos) detrás
+      rec.inner.firstChild && rec.inner.firstChild.remove && rec.inner.insertBefore(document.createTextNode(w.text), rec.star);
+      rec.star.textContent = w.votes ? ' ★' + w.votes : '';
 
       const bw = rec.el.offsetWidth, bh = rec.el.offsetHeight;
       const spot = findSpot(W, H, bw, bh, placed);
@@ -741,7 +1054,12 @@ function onStormWordClick(key, btnEl){
   currentTipKey = key;
 
   $('#wt-word').textContent  = '“' + w.text + '”';
-  $('#wt-stats').textContent = w.count + (w.count === 1 ? ' respuesta' : ' respuestas') + ' · ' + pctStr(w.pct) + ' de la clase';
+  let stats = w.count + (w.count === 1 ? ' respuesta' : ' respuestas') + ' · ' + pctStr(w.pct) + ' de la clase';
+  if (w.votes) stats += '  ·  ★ ' + w.votes + (w.votes === 1 ? ' voto' : ' votos');
+  $('#wt-stats').textContent = stats;
+  const wv = document.createElement('p');
+  $('#wt-stats').after($('#wt-stats').nextElementSibling && $('#wt-stats').nextElementSibling.classList ? $('#wt-stats').nextElementSibling : wv);
+
   const wa = $('#wt-authors');
   if (session.settings.anonymous){
     wa.hidden = true;
@@ -773,8 +1091,8 @@ function hideWordTooltip(){
   const key = currentTipKey;
   const n = q.responses.filter(r => r.key === key).length;
   hideWordTooltip();
-  await deleteResponsesByKey(teacherCode, q.id, key);
-  toast('Respuesta eliminada (' + n + ' apariciones)');
+  const done = await softDeleteResponsesByKey(teacherCode, q.id, key);
+  toast('Respuesta eliminada (' + done + ' apariciones)');
 });
 
 document.addEventListener('pointerdown', e => {
@@ -787,29 +1105,35 @@ document.addEventListener('pointerdown', e => {
    9 · RESULTADOS, GRÁFICOS, CSV E IMPRESIÓN
 ============================================================ */
 function renderResults(s, q){
+  const isScale = (q.type === 'scale');
   $('#res-q-tag').textContent = '· ' + (s.current + 1) + '/' + questions.length;
 
   const words = computeWords(q);
   const people = new Set(q.responses.map(r => r.authorId)).size;
-  $('#res-summary').textContent =
-    people + ' participantes · ' + q.responses.length +
+  let summary = people + ' participantes · ' + q.responses.length +
     (q.responses.length === 1 ? ' respuesta' : ' respuestas') +
     ' · ' + words.length + (words.length === 1 ? ' respuesta distinta' : ' respuestas distintas');
+  if (isScale){
+    const st = scaleStats(q);
+    if (st) summary += ' · media ' + numStr(st.mean) + ' · mediana ' + numStr(st.median);
+  }
+  $('#res-summary').textContent = summary;
 
   $('#sort-freq').classList.toggle('active', liveState.sort === 'freq');
   $('#sort-alpha').classList.toggle('active', liveState.sort === 'alpha');
 
-  // Selector de gráfico
+  // En escalas, el gráfico es fijo (distribución + caja); se oculta el selector
+  $('#chart-seg').hidden = isScale;
   $('#chart-bars').classList.toggle('active', liveState.chart === 'bars');
   $('#chart-dots').classList.toggle('active', liveState.chart === 'dots');
   $('#chart-donut').classList.toggle('active', liveState.chart === 'donut');
-  renderChartInto(words, q.responses.length);
+  renderChartInto(words, q.responses.length, q);
 
   const body = $('#res-body');
   body.textContent = '';
 
   if (!words.length){
-    body.innerHTML = '<tr><td colspan="6" class="res-empty">Todavía no hay respuestas en esta pregunta.</td></tr>';
+    body.innerHTML = '<tr><td colspan="7" class="res-empty">Todavía no hay respuestas en esta pregunta.</td></tr>';
     return;
   }
 
@@ -832,6 +1156,11 @@ function renderResults(s, q){
     tr.append(el('td', 'num', String(w.count)));
     tr.append(el('td', 'num', pctStr(w.pct)));
 
+    const tdV = el('td', 'num');
+    if (!isScale && w.votes > 0) tdV.append(el('span', 'res-votes', '★ ' + w.votes));
+    else tdV.textContent = '–';
+    tr.append(tdV);
+
     const tdB = el('td', 'bar-cell');
     const bar = el('div', 'res-bar');
     bar.style.width = Math.max(2, w.pct) + '%';
@@ -852,12 +1181,11 @@ function renderResults(s, q){
   });
 }
 
-/* --- Selector de tipo de gráfico --- */
 [['#chart-bars','bars'], ['#chart-dots','dots'], ['#chart-donut','donut']].forEach(([sel, mode]) => {
   $(sel).addEventListener('click', () => { liveState.chart = mode; renderLive(); });
 });
 
-function renderChartInto(words, total){
+function renderChartInto(words, total, q){
   const area = $('#chart-area');
   area.textContent = '';
 
@@ -865,12 +1193,12 @@ function renderChartInto(words, total){
     area.append(el('p', 'chart-note', 'Los gráficos aparecerán aquí en cuanto lleguen respuestas.'));
     return;
   }
+  if (q.type === 'scale'){ chartScale(area, q); return; }
   if (liveState.chart === 'bars')  chartBars(area, words);
   if (liveState.chart === 'dots')  chartDots(area, words);
   if (liveState.chart === 'donut') chartDonut(area, words, total);
 }
 
-/** GRÁFICO DE BARRAS · top 12 respuestas */
 function chartBars(area, words){
   const max = words[0].count;
   words.slice(0, 12).forEach(w => {
@@ -891,7 +1219,6 @@ function chartBars(area, words){
   }
 }
 
-/** GRÁFICO DE PUNTOS · cada punto = una respuesta de un alumno */
 function chartDots(area, words){
   area.append(el('p', 'chart-note', 'Cada punto es una respuesta.'));
   words.slice(0, 10).forEach(w => {
@@ -914,7 +1241,6 @@ function chartDots(area, words){
   }
 }
 
-/** GRÁFICO DE PASTEL (DONUT) · top 8 + "otras" */
 function chartDonut(area, words, total){
   const wrap = el('div', 'cdonut');
   const space = el('div', 'dspace');
@@ -956,7 +1282,105 @@ function chartDonut(area, words, total){
   area.append(wrap);
 }
 
-/* --- Eliminar respuesta desde la tabla (dos pasos) --- */
+/* --- Escala: estadística y caja y bigotes --- */
+function medianOf(a){
+  const s = [...a].sort((x, y) => x - y);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+function scaleStats(q){
+  const nums = q.responses.map(r => Number(r.key)).filter(n => n >= 1 && n <= 5);
+  if (!nums.length) return null;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const lower = sorted.slice(0, mid);
+  const upper = sorted.slice(sorted.length % 2 ? mid + 1 : mid);
+  return {
+    n: nums.length,
+    mean: nums.reduce((s, n) => s + n, 0) / nums.length,
+    median: medianOf(nums),
+    q1: lower.length ? medianOf(lower) : sorted[0],
+    q3: upper.length ? medianOf(upper) : sorted[sorted.length - 1],
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    nums
+  };
+}
+
+function chartScale(area, q){
+  const st = scaleStats(q);
+  if (!st) return;
+
+  // Etiquetas de los extremos, si existen
+  if (q.scaleMin || q.scaleMax){
+    const ends = el('div', 'scale-ends');
+    ends.append(el('span', '', '1 = ' + (q.scaleMin || '1')));
+    ends.append(el('span', '', (q.scaleMax || '5') + ' = 5'));
+    area.append(ends);
+  }
+
+  // Distribución 1–5 (siempre en orden, incluyendo ceros)
+  const counts = [0,0,0,0,0];
+  st.nums.forEach(n => counts[n - 1]++);
+  const max = Math.max(...counts, 1);
+  counts.forEach((c, i) => {
+    const row = el('div', 'cbar');
+    row.append(el('span', 'cbar-label', String(i + 1)));
+    const track = el('div', 'cbar-track');
+    const fill = el('div', 'cbar-fill');
+    fill.style.background = PALETTE[i % PALETTE.length];
+    track.append(fill);
+    row.append(track, el('span', 'cbar-val', c + ' · ' + pctStr(c / st.n * 100)));
+    area.append(row);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.width = Math.max(2, c / max * 100) + '%';
+    }));
+  });
+
+  // Media / mediana / extremos
+  const stats = el('div', 'scale-stats');
+  [['Media', numStr(st.mean)], ['Mediana', numStr(st.median)],
+   ['Mínimo', String(st.min)], ['Máximo', String(st.max)], ['Respuestas', String(st.n)]]
+    .forEach(([k, v]) => {
+      const d = el('span', 'ss');
+      d.append(el('b', '', v), document.createTextNode(k));
+      stats.append(d);
+    });
+  area.append(stats);
+
+  // Diagrama de caja y bigotes (SVG)
+  const W = 320, H = 64;
+  const map = v => 14 + ((v - 0.5) / 5) * (W - 28);
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'boxplot' });
+
+  svg.append(svgEl('line', { x1: map(st.min), y1: 26, x2: map(st.max), y2: 26, stroke: 'currentColor', 'stroke-width': 1.5 }));
+  [['min','1'],['max','5']].forEach(([k, t]) => {
+    const tx = svgEl('text', { x: map(st[k]), y: 20, 'text-anchor': 'middle', 'font-size': 9, fill: 'currentColor' });
+    tx.textContent = t;
+    svg.append(tx);
+  });
+  svg.append(svgEl('rect', {
+    x: map(st.q1), y: 18, width: Math.max(2, map(st.q3) - map(st.q1)), height: 16,
+    rx: 4, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8
+  }));
+  svg.append(svgEl('line', { x1: map(st.median), y1: 18, x2: map(st.median), y2: 34, stroke: '#FF5D3A', 'stroke-width': 2.4 }));
+
+  // Puntos individuales (con pequeño temblor para no solaparse)
+  st.nums.forEach((n, i) => {
+    svg.append(svgEl('circle', {
+      cx: map(n) + ((i % 7) - 3) * 2.2, cy: 48, r: 2.4,
+      fill: colorOf(String(n)), opacity: .85
+    }));
+  });
+  const leyenda = svgEl('text', { x: 2, y: 61, 'font-size': 8.5, fill: 'currentColor', opacity: .7 });
+  leyenda.textContent = 'cada punto es un alumno · línea naranja = mediana';
+  svg.append(leyenda);
+
+  area.append(svg);
+}
+
+/* --- Eliminar desde la tabla (dos pasos, soft delete) --- */
  $('#res-body').addEventListener('click', e => {
   const btn = e.target.closest('.res-del');
   if (!btn) return;
@@ -965,8 +1389,8 @@ function chartDonut(area, words, total){
     const q = currentQ();
     const n = q.responses.filter(r => r.key === key).length;
     hideWordTooltip();
-    deleteResponsesByKey(teacherCode, q.id, key)
-      .then(() => toast('Respuesta eliminada (' + n + ' apariciones)'));
+    softDeleteResponsesByKey(teacherCode, q.id, key)
+      .then(done => toast('Respuesta eliminada (' + done + ' apariciones)'));
   } else {
     btn.dataset.armed = '1';
     btn.classList.add('armed');
@@ -975,16 +1399,16 @@ function chartDonut(area, words, total){
   }
 });
 
-/* --- Exportación CSV --- */
+/* --- CSV --- */
 const csvEscape = v => '"' + String(v).replace(/"/g, '""') + '"';
 
  $('#btn-export').addEventListener('click', () => {
   if (!session) return;
   const s = sessionView();
-  const rows = [['Pregunta','Respuesta','Frecuencia','Porcentaje']];
+  const rows = [['Pregunta','Respuesta','Frecuencia','Porcentaje','Votos']];
   s.questions.forEach(q => {
     computeWords(q).forEach(w =>
-      rows.push([q.text, w.text, String(w.count), pctStr(w.pct)]));
+      rows.push([q.text, w.text, String(w.count), pctStr(w.pct), String(w.votes || 0)]));
   });
   const csv = '\uFEFF' + rows.map(r => r.map(csvEscape).join(';')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -998,7 +1422,7 @@ const csvEscape = v => '"' + String(v).replace(/"/g, '""') + '"';
   toast('CSV descargado');
 });
 
-/* --- Impresión / PDF (incluye distribución con puntos ●) --- */
+/* --- Impresión / PDF --- */
  $('#btn-print').addEventListener('click', () => {
   if (!session) return;
   buildPrintArea(sessionView());
@@ -1014,15 +1438,21 @@ function buildPrintArea(s){
   s.questions.forEach((q, i) => {
     const words = computeWords(q);
     const people = new Set(q.responses.map(r => r.authorId)).size;
+    let extra = ' · cada ● = 1 respuesta';
+    if (q.type === 'scale'){
+      const st = scaleStats(q);
+      if (st) extra += ' · media ' + numStr(st.mean) + ' · mediana ' + numStr(st.median);
+    }
     html += '<h2 class="pa-q">' + (i + 1) + '. ' + escHTML(q.text) + '</h2>'
-      + '<p class="pa-sum">' + people + ' participantes · ' + q.responses.length + ' respuestas · cada ● = 1 respuesta</p>';
+      + '<p class="pa-sum">' + people + ' participantes · ' + q.responses.length + ' respuestas' + extra + '</p>';
     if (words.length){
       html += '<table class="pa-table"><thead><tr><th>#</th><th>Respuesta</th>'
-        + '<th style="text-align:right">Frecuencia</th><th style="text-align:right">Porcentaje</th><th>Distribución</th></tr></thead><tbody>';
+        + '<th style="text-align:right">Frecuencia</th><th style="text-align:right">Porcentaje</th><th>Votos</th><th>Distribución</th></tr></thead><tbody>';
       words.forEach((w, j) => {
         const dots = '●'.repeat(Math.min(w.count, 30)) + (w.count > 30 ? '…' : '');
+        const votes = (q.type !== 'scale' && w.votes) ? '★ ' + w.votes : '–';
         html += '<tr><td>' + (j + 1) + '</td><td>' + escHTML(w.text) + '</td><td style="text-align:right">'
-          + w.count + '</td><td style="text-align:right">' + pctStr(w.pct) + '</td>'
+          + w.count + '</td><td style="text-align:right">' + pctStr(w.pct) + '</td><td>' + votes + '</td>'
           + '<td class="pa-dots">' + dots + '</td></tr>';
       });
       html += '</tbody></table>';
@@ -1034,7 +1464,7 @@ function buildPrintArea(s){
 }
 
 /* ============================================================
-   10 · ALUMNO: ENTRAR Y PARTICIPAR
+   10 · ALUMNO
 ============================================================ */
 function resetJoin(){
   joinCode = null;
@@ -1140,6 +1570,56 @@ function appendMyWords(z, mine){
   z.append(wrap);
 }
 
+/* --- Votación del alumno --- */
+async function castVote(q, key){
+  if (!session || !student) return;
+  const max = session.settings.maxVotes || VOTES_PER_STUDENT;
+  const my = (q.votesList || []).filter(v => v.voterId === student.authorId);
+  if (my.length >= max){ toast('Ya usaste tus ' + max + ' votos', 'warn'); return; }
+  if (my.some(v => v.key === key)){ toast('Ya votaste esa palabra', 'warn'); return; }
+  try{
+    await addVote(session.code, q.id, { voterId: student.authorId, key, ts: Date.now() });
+    playDrop();
+  }catch(err){
+    console.error(err);
+    toast('No se pudo votar (¿sin conexión?)', 'warn');
+  }
+}
+
+function appendVoteBox(z, q){
+  const max = session.settings.maxVotes || VOTES_PER_STUDENT;
+  const my = (q.votesList || []).filter(v => v.voterId === student.authorId);
+  const rem = max - my.length;
+  const words = computeWords(q);
+
+  const box = el('div', 'vote-box');
+  box.append(el('p', 'zone-title', 'Vota las palabras de tus compañeros'));
+  box.append(el('p', 'zone-sub', rem > 0
+    ? 'Toca hasta ' + rem + (rem === 1 ? ' palabra' : ' palabras') + ' para votarlas'
+    : 'Ya usaste tus ' + max + ' votos. ¡Bien ahí!'));
+
+  const chips = el('div', 'vote-chips');
+  if (rem > 0){
+    words.forEach(w => {
+      const b = el('button', 'vote-chip', w.text);
+      b.type = 'button';
+      b.addEventListener('click', () => castVote(q, w.key));
+      chips.append(b);
+    });
+  }
+  box.append(chips);
+
+  if (my.length){
+    const mine = el('div', 'my-votes');
+    my.forEach(v => {
+      const w = words.find(x => x.key === v.key);
+      mine.append(el('span', '', '★ ' + (w ? w.text : v.key)));
+    });
+    box.append(mine);
+  }
+  z.append(box);
+}
+
 function renderStudent(){
   if (!student) return;
 
@@ -1170,7 +1650,7 @@ function renderStudent(){
   if (s.ended){
     meta.textContent = 'Puedes cerrar esta página. ¡Gracias por participar!';
   } else {
-    meta.textContent = 'La clase lleva ' + responses.length +
+    meta.textContent = 'La clase lleva ' + responses.filter(r => !r.deleted).length +
       (responses.length === 1 ? ' respuesta' : ' respuestas');
   }
 
@@ -1188,8 +1668,10 @@ function renderStudent(){
   const mine = q.responses.filter(r => r.authorId === student.authorId);
   const remaining = s.settings.maxPerStudent - mine.length;
   const showingSent = justSent && justSent.until > Date.now();
+  const myVotesN = (q.votesList || []).filter(v => v.voterId === student.authorId).length;
 
-  const sig = [q.id, q.status, mine.length, showingSent ? justSent.text : ''].join('|');
+  const sig = [q.id, q.status, mine.length, showingSent ? justSent.text : '',
+               q.voting ? 'V' + myVotesN : '', q.type].join('|');
   if (sig === lastStudentSig) return;
   lastStudentSig = sig;
 
@@ -1198,17 +1680,21 @@ function renderStudent(){
 
   if (q.status === 'waiting'){
     z.append(messageZone(SVG_CLOCK, 'Espera un momento…', 'Tu profe todavía no ha abierto la pregunta.'));
+    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
     return;
   }
   if (q.status === 'paused'){
     z.append(messageZone(SVG_PAUSE, 'La tormenta está en pausa', 'Aprovecha para pensar tu respuesta.'));
+    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
     return;
   }
   if (q.status === 'closed'){
     z.append(messageZone(SVG_NEXT, 'Pregunta cerrada', 'Esperando la siguiente pregunta…'));
+    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
     return;
   }
 
+  // Pregunta abierta
   if (showingSent){
     const box = el('div', 'sent-box');
     box.append(checkSVG());
@@ -1221,6 +1707,7 @@ function renderStudent(){
       box.append(again);
     }
     z.append(box);
+    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
     return;
   }
 
@@ -1231,39 +1718,60 @@ function renderStudent(){
     box.append(el('p', 'zone-sub', '¡Bien jugado!'));
     z.append(box);
     appendMyWords(z, mine);
+    if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
     return;
   }
 
   z.append(el('p', 'q-text', q.text));
 
-  const form = el('form', 'answer-form');
-  const input = el('input');
-  input.type = 'text';
-  input.maxLength = MAX_LEN;
-  input.placeholder = 'Escribe tu respuesta…';
-  input.autocomplete = 'off';
-  const send = el('button', 'btn btn-ink');
-  send.type = 'submit';
-  send.innerHTML = SEND_SVG + ' Enviar';
-  form.append(input, send);
-  z.append(form);
+  if (q.type === 'scale'){
+    // ---- Escala 1–5: cinco botones grandes ----
+    if (q.scaleMin || q.scaleMax){
+      const ends = el('div', 'scale-ends-stu');
+      ends.append(el('span', '', '1 = ' + (q.scaleMin || '')));
+      ends.append(el('span', '', (q.scaleMax || '') + ' = 5'));
+      z.append(ends);
+    }
+    const row = el('div', 'scale-row');
+    for (let n = 1; n <= 5; n++){
+      const b = el('button', 'scale-btn', String(n));
+      b.type = 'button';
+      b.addEventListener('click', () => submitStudentAnswer(String(n)));
+      row.append(b);
+    }
+    z.append(row);
+  } else {
+    // ---- Palabra: formulario ----
+    const form = el('form', 'answer-form');
+    const input = el('input');
+    input.type = 'text';
+    input.maxLength = MAX_LEN;
+    input.placeholder = 'Escribe tu respuesta…';
+    input.autocomplete = 'off';
+    const send = el('button', 'btn btn-ink');
+    send.type = 'submit';
+    send.innerHTML = SEND_SVG + ' Enviar';
+    form.append(input, send);
+    z.append(form);
 
-  const note = el('p', 'remaining-note');
-  const cc = el('span');
-  cc.textContent = '0/' + MAX_LEN;
-  note.append(cc, document.createTextNode(' · te quedan ' + remaining + (remaining === 1 ? ' respuesta' : ' respuestas')));
-  z.append(note);
-  appendMyWords(z, mine);
+    const note = el('p', 'remaining-note');
+    const cc = el('span');
+    cc.textContent = '0/' + MAX_LEN;
+    note.append(cc, document.createTextNode(' · te quedan ' + remaining + (remaining === 1 ? ' respuesta' : ' respuestas')));
+    z.append(note);
+    appendMyWords(z, mine);
 
-  input.addEventListener('input', () => { cc.textContent = input.value.length + '/' + MAX_LEN; });
-  form.addEventListener('submit', e => { e.preventDefault(); submitStudentAnswer(input.value); });
+    input.addEventListener('input', () => { cc.textContent = input.value.length + '/' + MAX_LEN; });
+    form.addEventListener('submit', e => { e.preventDefault(); submitStudentAnswer(input.value); });
 
-  if (matchMedia('(pointer:fine)').matches) input.focus();
+    if (matchMedia('(pointer:fine)').matches) input.focus();
+  }
+
+  if (q.voting && q.type !== 'scale') appendVoteBox(z, q);
 }
 
 function submitStudentAnswer(raw){
-  if (!session) return;
-  if (session.ended) return;
+  if (!session || session.ended) return;
   const q = questions[clamp(session.current, 0, questions.length - 1)];
   if (q.status !== 'open'){ toast('La pregunta no está abierta', 'warn'); return; }
 
@@ -1273,19 +1781,26 @@ function submitStudentAnswer(raw){
   const mine = q.responses.filter(r => r.authorId === student.authorId);
   if (mine.length >= session.settings.maxPerStudent){ toast('Ya has usado todas tus respuestas', 'warn'); return; }
 
-  const text = sanitizeAnswer(raw);
-  const key = text ? normalizeKey(text) : null;
-  if (!text || !key){ toast('Esa respuesta no es válida', 'warn'); return; }
+  let text, key;
+  if (q.type === 'scale'){
+    const n = parseInt(raw, 10);
+    if (!(n >= 1 && n <= 5)) return;
+    text = String(n);
+    key = String(n);                       // claves "1".."5"
+  } else {
+    text = sanitizeAnswer(raw);
+    key = text ? normalizeKey(text) : null;
+    if (!text || !key){ toast('Esa respuesta no es válida', 'warn'); return; }
 
-  // Palabras bloqueadas por el profesor (coincidencia por substring normalizado)
-  const blocked = session.settings.blocked || [];
-  if (blocked.some(b => key.includes(b))){
-    toast('El profe ha bloqueado esa palabra en esta actividad', 'warn');
-    return;
+    const blocked = session.settings.blocked || [];
+    if (blocked.some(b => key.includes(b))){
+      toast('El profe ha bloqueado esa palabra en esta actividad', 'warn');
+      return;
+    }
   }
 
   if (!session.settings.allowRepeated && mine.some(r => r.key === key)){
-    toast('Ya enviaste esa misma palabra', 'warn');
+    toast('Ya enviaste esa misma respuesta', 'warn');
     return;
   }
 
@@ -1310,7 +1825,7 @@ function submitStudentAnswer(raw){
 }
 
 /* ============================================================
-   11 · LLUVIA DE DEMOSTRACIÓN
+   11 · LLUVIA DE DEMOSTRACIÓN (solo preguntas de palabra)
 ============================================================ */
 const DEMO_POOL = [
   'motivación','curiosidad','curiosidad','proyectos','práctica','práctica','ejemplos','compañeros',
@@ -1322,7 +1837,7 @@ let demoAuthors = null;
 
  $('#btn-demo').addEventListener('click', () => {
   const q = currentQ();
-  if (!q) return;
+  if (!q || q.type === 'scale') return;
   if (q.status !== 'open'){ toast('Abre la pregunta antes de lanzar la lluvia demo', 'warn'); return; }
   if (!demoAuthors) demoAuthors = Array.from({ length: 12 }, () => uid());
 
@@ -1332,8 +1847,8 @@ let demoAuthors = null;
       const text = DEMO_POOL[Math.floor(Math.random() * DEMO_POOL.length)];
       const key = normalizeKey(text);
       const authorId = demoAuthors[Math.floor(Math.random() * demoAuthors.length)];
-      if (!session || !session.settings.allowRepeated &&
-          q.responses.some(r => r.authorId === authorId && r.key === key)) return;
+      if (!session || (!session.settings.allowRepeated &&
+          q.responses.some(r => r.authorId === authorId && r.key === key))) return;
       addResponse(session.code, q.id, { text, key, authorId, authorName: null, ts: Date.now(), demo: true })
         .catch(err => console.error(err));
     }, i * 230);
@@ -1434,6 +1949,7 @@ function wrapCanvasText(ctx, text, x, y, maxW, lh){
   fontsReady.then(() => exportStormPNG(sessionView(), q, words));
 });
 
+/* El PNG sale siempre en estilo papel claro: es para diapositivas e impresión */
 function exportStormPNG(s, q, words){
   const W = 1600, H = 900;
   const canvas = document.createElement('canvas');
@@ -1458,14 +1974,15 @@ function exportStormPNG(s, q, words){
 
   ctx.textBaseline = 'top';
   shown.forEach(w => {
+    const label = w.text + (w.votes ? '  ★' + w.votes : '');
     const fontSize = Math.round(minS + (maxS - minS) * Math.sqrt(w.count / maxCount));
     ctx.font = '700 ' + fontSize + 'px "Space Grotesk", "Segoe UI", sans-serif';
-    const tw = ctx.measureText(w.text).width;
+    const tw = ctx.measureText(label).width;
     const th = fontSize * 1.15;
     const spot = findSpot(W, H, tw, th, placed);
     placed.push({ x: spot.x, y: spot.y, w: tw, h: th });
     ctx.fillStyle = colorOf(w.key);
-    ctx.fillText(w.text, spot.x, spot.y + (th - fontSize) / 2);
+    ctx.fillText(label, spot.x, spot.y + (th - fontSize) / 2);
   });
 
   const drop = new Path2D('M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z');
@@ -1505,7 +2022,10 @@ function exportStormPNG(s, q, words){
    12 · ARRANQUE
 ============================================================ */
 (function init(){
+  applyTheme(currentTheme());
+  renderSoundBtn();
   buildBackgroundWords();
+  startRain();
   renderHistory();
 
   try{
