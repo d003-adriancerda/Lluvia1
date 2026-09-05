@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Chubasco · Tormenta de palabras para el aula</title>
+  <title>ACnimbus · Tormenta de palabras para el aula</title>
   <meta name="description" content="Lanza una pregunta a tu clase y convierte las respuestas en una tormenta de palabras en directo.">
   <script>
     /* Aplica el tema guardado antes de pintar, para evitar destello */
     try{
-      var t = localStorage.getItem('chubasco:theme');
+      var t = localStorage.getItem('ACnimbus:theme');
       if(!t) t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
       document.documentElement.dataset.theme = t;
     }catch(e){}
@@ -34,7 +34,7 @@
       <header class="home-hero">
         <p class="brand">
           <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-          Chubasco
+          ACnimbus
         </p>
         <h1>La clase <em>opina</em>.</h1>
         <p class="lede">
@@ -127,7 +127,7 @@
         <div class="live-brand">
           <p class="brand small">
             <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            Chubasco
+            ACnimbus
           </p>
           <span class="live-activity" id="live-title"></span>
         </div>
@@ -268,7 +268,7 @@
       <div class="panel panel-join">
         <p class="brand">
           <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-          Chubasco
+          ACnimbus
         </p>
         <form id="join-form" novalidate>
           <div id="join-step1">
@@ -329,7 +329,7 @@
       </button>
       <p class="brand">
         <svg class="brand-drop" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 5 10.2 5 15a7 7 0 0 0 14 0C19 10.2 12 2 12 2Z" fill="#FF5D3A" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-        Chubasco
+        ACnimbus
       </p>
       <p class="qr-hint">Escanea con el móvil o escribe el código</p>
       <div id="qr-box" aria-label="Código QR de la sesión"></div>
