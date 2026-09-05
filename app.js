@@ -2,8 +2,7 @@
 
 /* ============================================================
    CHUBASCO · Tormenta de palabras para el aula
-   VERSIÓN FINAL: V2 multiusuario + Fases 1, 2, 3A + cerradura
-   de profesor y alumnos confinados a su pantalla
+   VERSIÓN FINAL + música de fondo + crecimiento animado
    ============================================================ */
 
 /* ============================================================
@@ -14,10 +13,11 @@ const S_KEY     = 'chubasco:student';
 const H_KEY     = 'chubasco:history';
 const THEME_KEY = 'chubasco:theme';
 const SOUND_KEY = 'chubasco:sound';
+const MUSIC_KEY = 'chubasco:music';
 
 /* ⚠️ CLAVE DEL PROFESOR — cámbiala por la que quieras.
    Sin esta clave nadie puede abrir el panel del profesor.
-   (Letras, números o guiones, sin espacios) */
+   (Entre comillas simples, sin apóstrofes dentro, sin espacios) */
 const TEACHER_PASS = 'PROFE-2025';
 
 const MAX_LEN    = 40;
@@ -105,6 +105,8 @@ const ICONS = {
 
 const ICON_SOUND = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>';
 const ICON_MUTE  = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>';
+const ICON_MUSIC = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+const ICON_MUSIC_OFF = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M2 2l20 20"/></svg>';
 const ICON_MOON  = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
 const ICON_SUN   = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
 const ICON_STAR  = '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 14.9 8.6 21.5 9.5 16.7 14.1 17.9 20.7 12 17.6 6.1 20.7 7.3 14.1 2.5 9.5 9.1 8.6z"/></svg>';
@@ -330,7 +332,7 @@ function refreshCurrentView(){
 }
 
 /* ============================================================
-   4bis · TEMA Y SONIDO
+   4bis · TEMA, SONIDO DE GOTAS Y MÚSICA DE FONDO
 ============================================================ */
 function currentTheme(){
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
@@ -348,6 +350,7 @@ function toggleTheme(){
  $('#theme-toggle').addEventListener('click', toggleTheme);
  $('#btn-theme-live').addEventListener('click', toggleTheme);
 
+/* --- Gota sintetizada --- */
 let audioCtx = null;
 let soundOn = true;
 try{ soundOn = localStorage.getItem(SOUND_KEY) !== 'off'; }catch(e){}
@@ -358,7 +361,13 @@ function ensureAudio(){
   }
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
 }
-document.addEventListener('pointerdown', ensureAudio);
+
+/* El primer clic de la página desbloquea el audio; si la música
+   estaba activada de una sesión anterior, arranca en ese momento */
+document.addEventListener('pointerdown', () => {
+  ensureAudio();
+  if (musicOn && audioCtx && audioCtx.state === 'running' && !musicTimer) startMusic();
+});
 
 let lastDropTs = 0;
 function playDrop(){
@@ -374,12 +383,12 @@ function playDrop(){
   const f0 = 650 + Math.random() * 550;
   o.type = 'sine';
   o.frequency.setValueAtTime(f0, t);
-  o.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.18);
+  o.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.12);
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.28, t + 0.015);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+  g.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
   o.connect(g); g.connect(audioCtx.destination);
-  o.start(t); o.stop(t + 0.35);
+  o.start(t); o.stop(t + 0.2);
 }
 
 function renderSoundBtn(){
@@ -395,8 +404,118 @@ function renderSoundBtn(){
   renderSoundBtn();
 });
 
+/* --- Música de fondo sintetizada: acordes lentos + lluvia sutil --- */
+let musicOn = false;
+try{ musicOn = localStorage.getItem(MUSIC_KEY) === 'on'; }catch(e){}
+let musicMaster = null, musicTimer = null, chordIdx = 0, rainSrc = null;
+
+/* Am7 · Fmaj7 · C · G — progresión cálida y neutra */
+const MUSIC_CHORDS = [
+  [220.00, 261.63, 329.63, 392.00],
+  [174.61, 220.00, 261.63, 329.63],
+  [130.81, 196.00, 261.63, 329.63],
+  [196.00, 246.94, 293.66, 392.00]
+];
+
+function playChord(){
+  if (!audioCtx || !musicMaster) return;
+  const chord = MUSIC_CHORDS[chordIdx % MUSIC_CHORDS.length];
+  chordIdx++;
+  const t = audioCtx.currentTime;
+  chord.forEach(f => {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'triangle';
+    o.frequency.value = f * (1 + (Math.random() * 0.003 - 0.0015)); // leve coro
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.02 + Math.random() * 0.008, t + 2.5);
+    g.gain.setValueAtTime(0.02 + Math.random() * 0.008, t + 6);
+    g.gain.linearRampToValueAtTime(0.0001, t + 9);
+    o.connect(g); g.connect(musicMaster);
+    o.start(t); o.stop(t + 9.2);
+  });
+}
+
+function startRainNoise(){
+  if (!audioCtx || !musicMaster || rainSrc) return;
+  const len = 2 * audioCtx.sampleRate;
+  const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < len; i++){
+    const w = Math.random() * 2 - 1;
+    last = (last + 0.03 * w) / 1.03;   // ruido "marrón" suave
+    d[i] = last * 3;
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf; src.loop = true;
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 1200;
+  const g = audioCtx.createGain(); g.gain.value = 0.04;
+  src.connect(lp); lp.connect(g); g.connect(musicMaster);
+  src.start();
+  rainSrc = src;
+}
+
+function startMusic(){
+  if (!audioCtx || musicTimer) return;
+  musicMaster = audioCtx.createGain();
+  musicMaster.gain.value = 1;
+  musicMaster.connect(audioCtx.destination);
+  playChord();
+  musicTimer = setInterval(playChord, 6000);
+  startRainNoise();
+}
+
+function stopMusic(){
+  if (musicTimer){ clearInterval(musicTimer); musicTimer = null; }
+  if (rainSrc){ try{ rainSrc.stop(); }catch(e){} rainSrc = null; }
+  if (musicMaster){
+    const m = musicMaster;
+    try{ m.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.4); }catch(e){}
+    setTimeout(() => { try{ m.disconnect(); }catch(e){} }, 1600);
+    musicMaster = null;
+  }
+}
+
+function renderMusicBtn(){
+  const b = $('#btn-music');
+  if (!b) return;
+  b.innerHTML = musicOn ? ICON_MUSIC : ICON_MUSIC_OFF;
+  b.classList.toggle('voting-on', musicOn);
+  b.title = musicOn ? 'Desactivar música de fondo' : 'Activar música de fondo';
+}
+
+function toggleMusic(){
+  musicOn = !musicOn;
+  try{ localStorage.setItem(MUSIC_KEY, musicOn ? 'on' : 'off'); }catch(e){}
+  ensureAudio();
+  if (musicOn && audioCtx && audioCtx.state === 'running'){
+    startMusic();
+    toast('Música de fondo activada');
+  } else if (musicOn){
+    toast('Música lista: sonará con tu próximo clic');
+  } else {
+    stopMusic();
+    toast('Música de fondo desactivada');
+  }
+  renderMusicBtn();
+}
+
+/** Crea el botón de música junto al de sonido (no toca el HTML). */
+function ensureMusicBtn(){
+  const snd = $('#btn-sound');
+  if (!snd || $('#btn-music')) return;
+  const b = el('button', 'btn btn-ghost btn-icon');
+  b.id = 'btn-music';
+  b.type = 'button';
+  b.addEventListener('click', toggleMusic);
+  snd.after(b);
+  renderMusicBtn();
+}
+
 /* ============================================================
-   4ter · LLUVIA AMBIENTAL
+   4ter · LLUVIA AMBIENTAL (visual)
 ============================================================ */
 function startRain(){
   const cv = $('#rain');
@@ -451,11 +570,17 @@ function startRain(){
   requestAnimationFrame(frame);
 }
 
+/* Animación de "pulso" cuando una palabra crece (se inyecta por JS) */
+(function injectGrowStyles(){
+  const st = document.createElement('style');
+  st.textContent =
+    '@keyframes word-grow{0%{scale:1}40%{scale:1.18}100%{scale:1}}' +
+    '.word.growing{animation:word-grow .55s cubic-bezier(.34,1.4,.5,1)}';
+  document.head.append(st);
+})();
+
 /* ============================================================
    4cuarto · CERRADURA DEL MODO PROFESOR
-   Pide TEACHER_PASS antes de abrir el panel. La clave se
-   recuerda por pestaña (sessionStorage) para no teclearla
-   cada vez. Los alumnos nunca la necesitan.
 ============================================================ */
 const PASS_SESSION = 'chubasco:prolock';
 let passCb = null;
@@ -463,7 +588,6 @@ let passCb = null;
 function ensurePassUI(){
   if ($('#pass-overlay')) return;
 
-  // Estilos propios del overlay (autocontenidos, no tocan style.css)
   const st = document.createElement('style');
   st.textContent = '#pass-overlay{position:fixed;inset:0;z-index:75;display:flex;align-items:center;justify-content:center;background:rgba(35,32,26,.45);backdrop-filter:blur(3px);padding:20px}';
   document.head.append(st);
@@ -864,7 +988,6 @@ function renderLive(){
   $('#btn-next-q').disabled  = (s.current >= questions.length - 1);
   $('#btn-demo').disabled    = (q.status !== 'open' || isScale);
 
-  // Botón de votación: solo preguntas de palabra
   const vbtn = $('#btn-vote');
   vbtn.hidden = isScale;
   vbtn.disabled = isScale;
@@ -934,7 +1057,6 @@ function animateNumber(elm, to){
  $('#sort-freq').addEventListener('click',  () => { liveState.sort = 'freq';  renderLive(); });
  $('#sort-alpha').addEventListener('click', () => { liveState.sort = 'alpha'; renderLive(); });
 
-/* Activar/desactivar votación de palabras */
  $('#btn-vote').addEventListener('click', () => {
   const q = currentQ();
   if (!q || q.type === 'scale') return;
@@ -1066,7 +1188,7 @@ class WordStorm{
 
     const maxCount = Math.max(...shown.map(w => w.count));
     const minS = clamp(H * 0.05, 15, 22);
-    const maxS = clamp(H * 0.18, 46, 86);
+    const maxS = clamp(H * 0.20, 48, 96);   // rango más dramático: la más repetida domina
     const placed = [];
 
     shown.forEach((w, i) => {
@@ -1074,9 +1196,12 @@ class WordStorm{
 
       let rec = this.els.get(w.key);
       const isNew = !rec;
+      let grew = false;
       if (isNew){
         const b = el('button', 'word');
         b.type = 'button';
+        // El tamaño y la posición transicionan con suavidad
+        b.style.transition = 'transform .65s cubic-bezier(.22,.9,.3,1.08), font-size .5s cubic-bezier(.34,1.3,.5,1)';
         const inner = el('span', 'w-in');
         inner.style.setProperty('--fd', (Math.random() * 3).toFixed(2) + 's');
         const star = el('span', 'w-star');
@@ -1085,15 +1210,35 @@ class WordStorm{
         b.style.color = colorOf(w.key);
         b.addEventListener('click', () => onStormWordClick(w.key, b));
         c.append(b);
-        rec = { el: b, inner, star };
+        rec = { el: b, inner, star, unitW: 0, unitH: 0, lastF: 0, lastCount: 0, lastText: '' };
         this.els.set(w.key, rec);
+      } else if (w.count > rec.lastCount){
+        grew = true;   // la palabra acaba de recibir una respuesta más
       }
       rec.el.style.fontSize = fontSize + 'px';
-      // El texto va primero; la estrella (si hay votos) detrás
-      rec.inner.firstChild && rec.inner.firstChild.remove && rec.inner.insertBefore(document.createTextNode(w.text), rec.star);
+      // Texto visible: la variante más escrita; estrella con votos detrás
+      if (w.text !== rec.lastText){
+        const txt = document.createTextNode(w.text);
+        rec.inner.insertBefore(txt, rec.star);
+        rec.inner.firstChild && rec.inner.firstChild !== txt && rec.inner.firstChild.nodeType === 3 && rec.inner.firstChild.remove();
+        rec.lastText = w.text;
+      }
       rec.star.textContent = w.votes ? ' ★' + w.votes : '';
 
-      const bw = rec.el.offsetWidth, bh = rec.el.offsetHeight;
+      // Medición: con texto sin salto de línea, el ancho es proporial
+      // al tamaño de fuente → medimos una vez y escalamos (evita medir
+      // a mitad de la transición de font-size).
+      if (!rec.lastF){
+        const bw = rec.el.offsetWidth, bh = rec.el.offsetHeight;
+        rec.unitW = bw / fontSize; rec.unitH = bh / fontSize;
+        rec.lastF = fontSize;
+      } else if (w.text !== rec.lastText && fontSize === rec.lastF){
+        const bw = rec.el.offsetWidth, bh = rec.el.offsetHeight;
+        rec.unitW = bw / fontSize; rec.unitH = bh / fontSize;
+      }
+      rec.lastF = fontSize;
+      const bw = rec.unitW * fontSize, bh = rec.unitH * fontSize;
+
       const spot = findSpot(W, H, bw, bh, placed);
       rec.el.style.transform = `translate(${spot.x}px, ${spot.y}px)`;
       placed.push({ x: spot.x, y: spot.y, w: bw, h: bh });
@@ -1103,7 +1248,14 @@ class WordStorm{
         const d = Math.min(i * 45, 450);
         rec.inner.style.animationDelay = `${d}ms, calc(${d}ms + .7s)`;
         setTimeout(() => rec.el.classList.remove('is-new'), 1400);
+      } else if (grew){
+        // Pulso de crecimiento: la palabra "late" al recibir otra respuesta
+        rec.el.classList.remove('growing');
+        void rec.el.offsetWidth;   // reinicia la animación
+        rec.el.classList.add('growing');
+        setTimeout(() => rec.el.classList.remove('growing'), 600);
       }
+      rec.lastCount = w.count;
     });
 
     const ov = $('#storm-overflow');
@@ -1133,8 +1285,6 @@ function onStormWordClick(key, btnEl){
   let stats = w.count + (w.count === 1 ? ' respuesta' : ' respuestas') + ' · ' + pctStr(w.pct) + ' de la clase';
   if (w.votes) stats += '  ·  ★ ' + w.votes + (w.votes === 1 ? ' voto' : ' votos');
   $('#wt-stats').textContent = stats;
-  const wv = document.createElement('p');
-  $('#wt-stats').after($('#wt-stats').nextElementSibling && $('#wt-stats').nextElementSibling.classList ? $('#wt-stats').nextElementSibling : wv);
 
   const wa = $('#wt-authors');
   if (session.settings.anonymous){
@@ -1165,7 +1315,6 @@ function hideWordTooltip(){
   if (!currentTipKey) return;
   const q = currentQ();
   const key = currentTipKey;
-  const n = q.responses.filter(r => r.key === key).length;
   hideWordTooltip();
   const done = await softDeleteResponsesByKey(teacherCode, q.id, key);
   toast('Respuesta eliminada (' + done + ' apariciones)');
@@ -1176,6 +1325,9 @@ document.addEventListener('pointerdown', e => {
   if (e.target.closest('#word-tooltip') || e.target.closest('.word')) return;
   hideWordTooltip();
 });
+
+/* ▼▼ CONTINÚA EN LA PARTE 2 — sigue pegando a continuación, NO guardes todavía ▼▼ */
+/* ▲▲ CONTINUACIÓN de app.js (Parte 2 de 2) ▲▲ */
 
 /* ============================================================
    9 · RESULTADOS, GRÁFICOS, CSV E IMPRESIÓN
@@ -1198,7 +1350,6 @@ function renderResults(s, q){
   $('#sort-freq').classList.toggle('active', liveState.sort === 'freq');
   $('#sort-alpha').classList.toggle('active', liveState.sort === 'alpha');
 
-  // En escalas, el gráfico es fijo (distribución + caja); se oculta el selector
   $('#chart-seg').hidden = isScale;
   $('#chart-bars').classList.toggle('active', liveState.chart === 'bars');
   $('#chart-dots').classList.toggle('active', liveState.chart === 'dots');
@@ -1388,7 +1539,6 @@ function chartScale(area, q){
   const st = scaleStats(q);
   if (!st) return;
 
-  // Etiquetas de los extremos, si existen
   if (q.scaleMin || q.scaleMax){
     const ends = el('div', 'scale-ends');
     ends.append(el('span', '', '1 = ' + (q.scaleMin || '1')));
@@ -1396,7 +1546,6 @@ function chartScale(area, q){
     area.append(ends);
   }
 
-  // Distribución 1–5 (siempre en orden, incluyendo ceros)
   const counts = [0,0,0,0,0];
   st.nums.forEach(n => counts[n - 1]++);
   const max = Math.max(...counts, 1);
@@ -1414,7 +1563,6 @@ function chartScale(area, q){
     }));
   });
 
-  // Media / mediana / extremos
   const stats = el('div', 'scale-stats');
   [['Media', numStr(st.mean)], ['Mediana', numStr(st.median)],
    ['Mínimo', String(st.min)], ['Máximo', String(st.max)], ['Respuestas', String(st.n)]]
@@ -1425,7 +1573,6 @@ function chartScale(area, q){
     });
   area.append(stats);
 
-  // Diagrama de caja y bigotes (SVG)
   const W = 320, H = 64;
   const map = v => 14 + ((v - 0.5) / 5) * (W - 28);
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'boxplot' });
@@ -1442,7 +1589,6 @@ function chartScale(area, q){
   }));
   svg.append(svgEl('line', { x1: map(st.median), y1: 18, x2: map(st.median), y2: 34, stroke: '#FF5D3A', 'stroke-width': 2.4 }));
 
-  // Puntos individuales (con pequeño temblor para no solaparse)
   st.nums.forEach((n, i) => {
     svg.append(svgEl('circle', {
       cx: map(n) + ((i % 7) - 3) * 2.2, cy: 48, r: 2.4,
@@ -1804,7 +1950,6 @@ function renderStudent(){
   z.append(el('p', 'q-text', q.text));
 
   if (q.type === 'scale'){
-    // ---- Escala 1–5: cinco botones grandes ----
     if (q.scaleMin || q.scaleMax){
       const ends = el('div', 'scale-ends-stu');
       ends.append(el('span', '', '1 = ' + (q.scaleMin || '')));
@@ -1820,7 +1965,6 @@ function renderStudent(){
     }
     z.append(row);
   } else {
-    // ---- Palabra: formulario ----
     const form = el('form', 'answer-form');
     const input = el('input');
     input.type = 'text';
@@ -1865,7 +2009,7 @@ function submitStudentAnswer(raw){
     const n = parseInt(raw, 10);
     if (!(n >= 1 && n <= 5)) return;
     text = String(n);
-    key = String(n);                       // claves "1".."5"
+    key = String(n);
   } else {
     text = sanitizeAnswer(raw);
     key = text ? normalizeKey(text) : null;
@@ -2103,6 +2247,7 @@ function exportStormPNG(s, q, words){
 (function init(){
   applyTheme(currentTheme());
   renderSoundBtn();
+  ensureMusicBtn();          // botón de música (junto al de sonido)
   buildBackgroundWords();
   startRain();
   renderHistory();
