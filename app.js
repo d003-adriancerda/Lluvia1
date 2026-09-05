@@ -404,38 +404,83 @@ function renderSoundBtn(){
   renderSoundBtn();
 });
 
-/* --- Música de fondo sintetizada: acordes lentos + lluvia sutil --- */
+/* --- Música de fondo: Nocturne Op. 9 No. 2 (Chopin, dominio público),
+       apertura sintetizada con Web Audio + colchón de ruido gris suave --- */
 let musicOn = false;
 try{ musicOn = localStorage.getItem(MUSIC_KEY) === 'on'; }catch(e){}
-let musicMaster = null, musicTimer = null, chordIdx = 0, rainSrc = null;
+let musicMaster = null, musicTimer = null, rainSrc = null;
+let loopStart = 0;
 
-/* Am7 · Fmaj7 · C · G — progresión cálida y neutra */
-const MUSIC_CHORDS = [
-  [220.00, 261.63, 329.63, 392.00],
-  [174.61, 220.00, 261.63, 329.63],
-  [130.81, 196.00, 261.63, 329.63],
-  [196.00, 246.94, 293.66, 392.00]
+const TEMPO_8TH = 0.36;          // duración de una corchea (s) · 12/8 calmado
+const LOOP_UNITS = 48;           // 4 compases de 12/8
+const LOOP_SEC   = LOOP_UNITS * TEMPO_8TH;
+
+/* Frecuencias (Mi♭ mayor) */
+const F = {
+  F2:87.31, Bb2:116.54, Eb2:77.78, C3:130.81,
+  Ab3:207.65, A3:220.00, G3:196.00,
+  C4:261.63, D4:293.66, Eb4:311.13, F4:349.23,
+  G4:392.00, A4:440.00, Bb4:466.16, B4:493.88,
+  C5:523.25, D5:587.33, Eb5:622.25, F5:698.46, G5:783.99, Fsharp4:369.99
+};
+
+/* Melodía: [nota, inicio, duración] en corcheas · frase de apertura simplificada */
+const MELODY = [
+  [F.Bb4,0,3],[F.C5,3,1],[F.D5,4,4],[F.Eb5,8,4],
+  [F.G5,12,3],[F.F5,15,1],[F.Eb5,16,4],[F.D5,20,3],[F.C5,23,1],
+  [F.Bb4,24,3],[F.C5,27,1],[F.Bb4,28,3],[F.A4,31,1],[F.G4,32,4],
+  [F.Fsharp4,36,3],[F.G4,39,1],[F.Bb4,40,3],[F.A4,43,1],[F.Fsharp4,44,2],[F.G4,46,2]
 ];
 
-function playChord(){
-  if (!audioCtx || !musicMaster) return;
-  const chord = MUSIC_CHORDS[chordIdx % MUSIC_CHORDS.length];
-  chordIdx++;
-  const t = audioCtx.currentTime;
-  chord.forEach(f => {
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'triangle';
-    o.frequency.value = f * (1 + (Math.random() * 0.003 - 0.0015)); // leve coro
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.02 + Math.random() * 0.008, t + 2.5);
-    g.gain.setValueAtTime(0.02 + Math.random() * 0.008, t + 6);
-    g.gain.linearRampToValueAtTime(0.0001, t + 9);
-    o.connect(g); g.connect(musicMaster);
-    o.start(t); o.stop(t + 9.2);
+/* Acompañamiento: bajo al inicio de cada compás + acordes en pulsos 0/4/8 */
+const BASS = [[F.Bb2,0],[F.Eb2,12],[F.C3,24],[F.F2,36]];
+const CHORDS = [
+  [[F.Ab3,F.D4,F.F4], 0],
+  [[F.G3,F.Bb3,F.Eb4], 12],
+  [[F.C4,F.Eb4,F.G4], 24],
+  [[F.A3,F.C4,F.Eb4], 36]
+];
+
+/** Nota de "piano": doble oscilador + envolvente de piano + filtro que se apaga. */
+function pianoNote(freq, when, dur, vel){
+  const g  = audioCtx.createGain();
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(freq * 6, when);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(400, freq * 1.6), when + dur);
+
+  const o1 = audioCtx.createOscillator();
+  o1.type = 'triangle';
+  o1.frequency.value = freq * (1 + (Math.random() * 0.002 - 0.001)); // leve coro
+  const o2 = audioCtx.createOscillator();
+  o2.type = 'sine';
+  o2.frequency.value = freq * 2.001;
+  const g2 = audioCtx.createGain();
+  g2.gain.value = 0.16;
+  o1.connect(lp); o2.connect(g2); g2.connect(lp);
+  lp.connect(g); g.connect(musicMaster);
+
+  const peak = 0.06 * vel;
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.linearRampToValueAtTime(peak, when + 0.012);                       // ataque
+  g.gain.exponentialRampToValueAtTime(peak * 0.32, when + Math.min(1.2, dur * 0.6)); // caída
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.4);           // cola
+
+  o1.start(when); o2.start(when);
+  o1.stop(when + dur + 0.45); o2.stop(when + dur + 0.45);
+}
+
+/** Programa una vuelta completa del bucle a partir del instante t0. */
+function scheduleLoop(t0){
+  MELODY.forEach(([f, st, du]) => pianoNote(f, t0 + st * TEMPO_8TH, du * TEMPO_8TH, 1.0));
+  BASS.forEach(([f, st])   => pianoNote(f, t0 + st * TEMPO_8TH, 11 * TEMPO_8TH, 0.85));
+  CHORDS.forEach(([notes, start]) => {
+    [0,4,8].forEach(off => notes.forEach(f =>
+      pianoNote(f, t0 + (start + off) * TEMPO_8TH, 3.3 * TEMPO_8TH, 0.3)));
   });
 }
 
+/** Ruido gris (lluvia suave) como colchón bajo el piano. */
 function startRainNoise(){
   if (!audioCtx || !musicMaster || rainSrc) return;
   const len = 2 * audioCtx.sampleRate;
@@ -444,14 +489,14 @@ function startRainNoise(){
   let last = 0;
   for (let i = 0; i < len; i++){
     const w = Math.random() * 2 - 1;
-    last = (last + 0.03 * w) / 1.03;   // ruido "marrón" suave
+    last = (last + 0.03 * w) / 1.03;
     d[i] = last * 3;
   }
   const src = audioCtx.createBufferSource();
   src.buffer = buf; src.loop = true;
   const lp = audioCtx.createBiquadFilter();
-  lp.type = 'lowpass'; lp.frequency.value = 1200;
-  const g = audioCtx.createGain(); g.gain.value = 0.04;
+  lp.type = 'lowpass'; lp.frequency.value = 1000;
+  const g = audioCtx.createGain(); g.gain.value = 0.03;
   src.connect(lp); lp.connect(g); g.connect(musicMaster);
   src.start();
   rainSrc = src;
@@ -460,10 +505,17 @@ function startRainNoise(){
 function startMusic(){
   if (!audioCtx || musicTimer) return;
   musicMaster = audioCtx.createGain();
-  musicMaster.gain.value = 1;
+  musicMaster.gain.value = 0.9;
   musicMaster.connect(audioCtx.destination);
-  playChord();
-  musicTimer = setInterval(playChord, 6000);
+  loopStart = audioCtx.currentTime + 0.15;
+  scheduleLoop(loopStart);
+  // Reprograma cada vuelta un instante antes de que termine (bucle perfecto)
+  musicTimer = setInterval(() => {
+    if (audioCtx.currentTime > loopStart + LOOP_SEC - 1.5){
+      loopStart += LOOP_SEC;
+      scheduleLoop(loopStart);
+    }
+  }, 500);
   startRainNoise();
 }
 
@@ -472,8 +524,8 @@ function stopMusic(){
   if (rainSrc){ try{ rainSrc.stop(); }catch(e){} rainSrc = null; }
   if (musicMaster){
     const m = musicMaster;
-    try{ m.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.4); }catch(e){}
-    setTimeout(() => { try{ m.disconnect(); }catch(e){} }, 1600);
+    try{ m.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.25); }catch(e){}
+    setTimeout(() => { try{ m.disconnect(); }catch(e){} }, 1500);
     musicMaster = null;
   }
 }
@@ -492,7 +544,7 @@ function toggleMusic(){
   ensureAudio();
   if (musicOn && audioCtx && audioCtx.state === 'running'){
     startMusic();
-    toast('Música de fondo activada');
+    toast('Nocturne de Chopin · música de fondo activada');
   } else if (musicOn){
     toast('Música lista: sonará con tu próximo clic');
   } else {
@@ -501,7 +553,6 @@ function toggleMusic(){
   }
   renderMusicBtn();
 }
-
 /** Crea el botón de música junto al de sonido (no toca el HTML). */
 function ensureMusicBtn(){
   const snd = $('#btn-sound');
