@@ -2,40 +2,26 @@
 
 /* ============================================================
    CHUBASCO · Tormenta de palabras para el aula
-   VERSIÓN 2 · MULTIUSUARIO (Firebase Firestore)
-   ============================================================
-   Secciones:
-     1. Constantes y utilidades
-     2. Toasts e iconos dinámicos
-     3. STORE FIREBASE: configuración, espejo de datos y escrituras
-     4. Router de vistas y estado global
-     5. Fondo decorativo
-     6. Configuración del profesor (crear sesión)
-     7. Panel del profesor en directo
-     8. La tormenta de palabras (WordStorm)
-     9. Resultados, CSV e impresión
-    10. Alumno: entrar y participar
-    11. Lluvia de demostración
-    11bis. Paquete Aula: QR, Proyector y PNG
-    12. Arranque
+   VERSIÓN 2 · MULTIUSUARIO (Firebase) + FASE 1
+   (gráficos estadísticos, palabras bloqueadas, historial)
    ============================================================ */
 
 /* ============================================================
    1 · CONSTANTES Y UTILIDADES
 ============================================================ */
-const T_KEY = 'chubasco:teacher';   // sesión del profesor (sessionStorage)
-const S_KEY = 'chubasco:student';   // identidad del alumno  (sessionStorage)
+const T_KEY = 'chubasco:teacher';
+const S_KEY = 'chubasco:student';
+const H_KEY = 'chubasco:history';   // historial de sesiones del profesor
 
-const MAX_LEN    = 40;    // longitud máxima de una respuesta
-const COOLDOWN   = 1200;  // ms mínimo entre envíos del mismo alumno
-const MAX_UNIQUE = 60;    // palabras únicas máximas dibujadas en la tormenta
-const MAX_Q      = 10;    // preguntas por sesión
+const MAX_LEN    = 40;
+const COOLDOWN   = 1200;
+const MAX_UNIQUE = 60;
+const MAX_Q      = 10;
 
 const PALETTE = ['#FF5D3A','#0E9594','#F3A712','#2E6F95','#D1465F','#6FA540'];
 
-const $  = (sel, ctx = document) => ctx.querySelector(sel);
+const $ = (sel, ctx = document) => ctx.querySelector(sel);
 
-/** Crea un elemento con clase y texto (siempre textContent → sin inyección HTML). */
 function el(tag, cls, text){
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -55,7 +41,6 @@ function hashString(s){
   return Math.abs(h);
 }
 
-/** Color estable para cada respuesta (por su clave normalizada). */
 const colorOf = key => PALETTE[hashString(key) % PALETTE.length];
 
 const pctStr = p => p.toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' %';
@@ -63,10 +48,13 @@ const pctStr = p => p.toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' 
 const escHTML = s => String(s).replace(/[&<>"]/g, c =>
   ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 
-/**
- * Clave para agrupar respuestas equivalentes:
- * minúsculas, sin tildes, sin signos. Conserva la ñ.
- */
+const svgNS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs){
+  const n = document.createElementNS(svgNS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
 function normalizeKey(t){
   return String(t).toLowerCase()
     .replaceAll('ñ', '\u0001')
@@ -76,19 +64,14 @@ function normalizeKey(t){
     .replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Saneado de la respuesta del alumno. Devuelve null si no es válida.
- * Controles básicos: longitud, sin enlaces, solo texto/puntuación razonable.
- */
 function sanitizeAnswer(raw){
   let s = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_LEN);
   if (!s) return null;
-  if (/(https?:\/\/|www\.)/i.test(s)) return null;                  // sin URLs
-  if (!/^[\p{L}\p{N}\s.,!¡¿?;:'’\-()%&+]+$/u.test(s)) return null;  // sin código
+  if (/(https?:\/\/|www\.)/i.test(s)) return null;
+  if (!/^[\p{L}\p{N}\s.,!¡¿?;:'’\-()%&+]+$/u.test(s)) return null;
   return s;
 }
 
-/** Nombre del alumno: texto corto, sin símbolos raros. */
 function sanitizeName(raw){
   const s = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, 24);
   if (!s) return '';
@@ -96,7 +79,7 @@ function sanitizeName(raw){
 }
 
 /* ============================================================
-   2 · TOASTS E ICONOS DINÁMICOS
+   2 · TOASTS E ICONOS
 ============================================================ */
 function toast(msg, type = ''){
   const t = el('div', 'toast' + (type ? ' ' + type : ''), msg);
@@ -120,22 +103,17 @@ const SVG_CLOUD  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 
 /* ============================================================
    3 · STORE FIREBASE
-   ------------------------------------------------------------
-   ⚠️ CONFIGURACIÓN DE FIREBASE — PEGA AQUÍ TUS VALORES ⚠️
-   Consola de Firebase → ⚙️ Configuración del proyecto →
-   "Tus apps" → copia los valores del objeto firebaseConfig.
-   Sustituye los textos "PEGA-AQUI" (deja las comillas).
+   (Configuración ya pegada con los datos del proyecto lluvia1-925b4)
 ============================================================ */
 const firebaseConfig = {
-  apiKey: "AIzaSyD4z8oA77TdBu54z0vdCt7PbM011EtoNGI",
-  authDomain: "lluvia1-925b4.firebaseapp.com",
-  projectId: "lluvia1-925b4",
-  storageBucket: "lluvia1-925b4.firebasestorage.app",
+  apiKey:            "AIzaSyD4z8oA77TdBu54z0vdCt7PbM011EtoNGI",
+  authDomain:        "lluvia1-925b4.firebaseapp.com",
+  projectId:         "lluvia1-925b4",
+  storageBucket:     "lluvia1-925b4.firebasestorage.app",
   messagingSenderId: "273174021964",
-  appId: "1:273174021964:web:899db28c7d320c47daf1e9"
+  appId:             "1:273174021964:web:899db28c7d320c47daf1e9"
 };
 
-/* ¿Está configurado? (evita errores confusos si aún no pegaste los valores) */
 const FIREBASE_OK = !Object.values(firebaseConfig).some(v => String(v).includes('PEGA-AQUI'));
 
 let fdb = null;
@@ -144,14 +122,13 @@ if (FIREBASE_OK){
   fdb = firebase.firestore();
   fdb.settings({ ignoreUndefinedProperties: true });
 } else {
-  setTimeout(() => toast('Falta la configuración de Firebase en app.js (líneas del inicio)', 'warn'), 800);
+  setTimeout(() => toast('Falta la configuración de Firebase en app.js', 'warn'), 800);
 }
 
-/* --- Espejo local de la sesión (lo que pinta la interfaz) --- */
-let session   = null;   // {code,title,settings,current,ended,createdAt}
-let questions = [];     // [{id,text,status,order,responses:[]}]
-let responses = [];     // [{id,code,qid,text,key,authorId,authorName,ts}]
-let sessionStatus = 'idle';   // 'idle' | 'loading' | 'live' | 'missing'
+let session   = null;
+let questions = [];
+let responses = [];
+let sessionStatus = 'idle';
 let unsub1 = null, unsub2 = null, unsub3 = null;
 
 function stopWatching(){
@@ -159,7 +136,6 @@ function stopWatching(){
   unsub1 = unsub2 = unsub3 = null;
 }
 
-/** Reparte las respuestas dentro de sus preguntas (todo en memoria). */
 function attachResponses(){
   questions.forEach(q => {
     q.responses = responses
@@ -168,7 +144,6 @@ function attachResponses(){
   });
 }
 
-/** Escucha una sesión en tiempo real (3 suscripciones). */
 function watchSession(code){
   stopWatching();
   sessionStatus = 'loading';
@@ -199,19 +174,16 @@ function watchSession(code){
   });
 }
 
-/** Pregunta actualmente proyectada (o null mientras carga). */
 function currentQ(){
   if (!session || !questions.length) return null;
   const i = clamp(session.current, 0, questions.length - 1);
   return questions[i];
 }
 
-/** Vista-foto de la sesión para exportar (CSV, PDF, PNG). */
 function sessionView(){
   return Object.assign({}, session, { questions });
 }
 
-/* --- Operaciones de escritura --- */
 async function generateCode(){
   const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   while (true){
@@ -248,7 +220,6 @@ function addResponse(code, qid, r){
   return fdb.collection('responses').add(Object.assign({ code, qid }, r));
 }
 
-/** Borra todas las respuestas de una pregunta que coincidan con una clave. */
 async function deleteResponsesByKey(code, qid, key){
   const snap = await fdb.collection('responses').where('code', '==', code).get();
   const batch = fdb.batch();
@@ -261,7 +232,6 @@ async function deleteResponsesByKey(code, qid, key){
   return n;
 }
 
-/** Borra TODAS las respuestas de una pregunta (reiniciar). */
 async function clearResponses(code, qid){
   const snap = await fdb.collection('responses').where('code', '==', code).get();
   const batch = fdb.batch();
@@ -280,9 +250,9 @@ const VIEWS = ['home','setup','live','join','student'];
 let currentView = 'home';
 
 let teacherCode = sessionStorage.getItem(T_KEY) || null;
-let student     = null;                       // { code, authorId, name }
-let joinCode    = null;                       // código validado en el paso 1 del join
-const liveState = { mode:'storm', sort:'freq' };
+let student     = null;
+let joinCode    = null;
+const liveState = { mode:'storm', sort:'freq', chart:'bars' };
 let lastStudentSig = null;
 let justSent    = null;
 let lastSubmitTs = 0;
@@ -342,11 +312,14 @@ function readSetupQuestions(){
 
   const title  = ($('#setup-title').value.replace(/\s+/g, ' ').trim() || 'Actividad sin título').slice(0, 60);
   const maxPer = clamp(parseInt($('#setup-max').value, 10) || 3, 1, 10);
+  const blocked = $('#setup-blocked').value.split('\n')
+    .map(normalizeKey).filter(Boolean).slice(0, 50);
 
   const settings = {
     maxPerStudent : maxPer,
     allowRepeated : $('#setup-repeat').checked,
-    anonymous     : $('#setup-anon').checked
+    anonymous     : $('#setup-anon').checked,
+    blocked
   };
   const qs = questionsInput.map(t => ({ id: uid(), text: t }));
 
@@ -359,6 +332,7 @@ function readSetupQuestions(){
     teacherCode = code;
     sessionStorage.setItem(T_KEY, teacherCode);
     liveState.mode = 'storm';
+    addHistory(code, title);
     watchSession(code);
     showView('live');
     renderLive();
@@ -383,13 +357,70 @@ function readSetupQuestions(){
   teacherCode = null;
   sessionStatus = 'idle';
   showView('home');
+  renderHistory();
 });
+
+/* ============================================================
+   6bis · HISTORIAL DE SESIONES DEL PROFESOR
+   (lista local en este navegador; los datos viven en Firebase)
+============================================================ */
+function loadHistory(){
+  try{ return JSON.parse(localStorage.getItem(H_KEY)) || []; }catch(e){ return []; }
+}
+function saveHistoryList(list){
+  try{ localStorage.setItem(H_KEY, JSON.stringify(list.slice(0, 20))); }catch(e){}
+}
+function addHistory(code, title){
+  const list = loadHistory().filter(h => h.code !== code);
+  list.unshift({ code, title, ts: Date.now() });
+  saveHistoryList(list);
+}
+function removeHistory(code){
+  saveHistoryList(loadHistory().filter(h => h.code !== code));
+  renderHistory();
+  toast('Sesión quitada de la lista (los datos siguen en Firebase)');
+}
+
+function renderHistory(){
+  const list = loadHistory();
+  const box = $('#history-box'), wrap = $('#history-list');
+  box.hidden = !list.length;
+  wrap.textContent = '';
+  list.forEach(h => {
+    const item = el('div', 'history-item');
+    const info = el('div');
+    info.append(el('b', '', h.title));
+    const fecha = new Date(h.ts).toLocaleDateString('es-ES', { day:'numeric', month:'short', year:'numeric' });
+    info.append(el('div', 'h-date', fecha + ' · ' + h.code));
+    const actions = el('div', 'h-actions');
+
+    const open = el('button', 'btn btn-ghost btn-sm', 'Abrir');
+    open.type = 'button';
+    open.addEventListener('click', () => openHistorySession(h.code));
+
+    const del = el('button', 'btn btn-ghost btn-sm', 'Quitar');
+    del.type = 'button';
+    del.addEventListener('click', () => removeHistory(h.code));
+
+    actions.append(open, del);
+    item.append(info, actions);
+    wrap.append(item);
+  });
+}
+
+function openHistorySession(code){
+  if (!FIREBASE_OK) return;
+  teacherCode = code;
+  sessionStorage.setItem(T_KEY, code);
+  liveState.mode = 'storm';
+  watchSession(code);
+  showView('live');
+  renderLive();
+}
 
 /* ============================================================
    7 · PANEL DEL PROFESOR EN DIRECTO
 ============================================================ */
-
-/** Confirmación en dos pasos para acciones destructivas. */
 function armTwoStep(btn, fn){
   if (btn.dataset.armed){
     delete btn.dataset.armed;
@@ -420,9 +451,10 @@ function renderLive(){
     teacherCode = null;
     sessionStatus = 'idle';
     showView('home');
+    renderHistory();
+    toast('Esa sesión ya no existe en Firebase');
     return;
   }
-  // Mientras llegan los datos de Firebase, pintamos lo que haya
   if (sessionStatus !== 'live' || !session || !questions.length) return;
 
   const s = session;
@@ -435,17 +467,14 @@ function renderLive(){
   $('#pj-question').textContent = q.text;
   $('#pj-count').textContent = q.responses.length + (q.responses.length === 1 ? ' respuesta' : ' respuestas');
 
-  // Estado de la pregunta
   const badge = $('#live-status-badge');
   badge.className = 'status-badge st-' + q.status;
   badge.textContent = { waiting:'En espera', open:'Abierta', paused:'En pausa', closed:'Cerrada' }[q.status];
 
-  // Estadísticas
   $('#stat-qnum').textContent = (s.current + 1) + '/' + questions.length;
   $('#stat-people').textContent = new Set(q.responses.map(r => r.authorId)).size;
   animateNumber($('#stat-answers'), q.responses.length);
 
-  // Navegación entre preguntas
   const nav = $('#qnav');
   nav.textContent = '';
   questions.forEach((qq, i) => {
@@ -461,7 +490,6 @@ function renderLive(){
     nav.append(b);
   });
 
-  // Consola
   const tbtn = $('#btn-toggle-status');
   if (q.status === 'waiting'){ tbtn.innerHTML = ICONS.play  + ' Abrir pregunta'; tbtn.disabled = false; }
   else if (q.status === 'open'){ tbtn.innerHTML = ICONS.pause + ' Pausar';       tbtn.disabled = false; }
@@ -473,7 +501,6 @@ function renderLive(){
   $('#btn-demo').disabled    = (q.status !== 'open');
   $('#btn-view-results').innerHTML = ICONS.chart + ' ' + (liveState.mode === 'storm' ? 'Resultados' : 'Ver tormenta');
 
-  // Paneles: tormenta o resultados
   const stormOn = (liveState.mode === 'storm');
   $('#storm').hidden = !stormOn;
   $('#results-panel').hidden = stormOn;
@@ -485,7 +512,6 @@ function renderLive(){
   }
 }
 
-/** Contador animado para las estadísticas. */
 function animateNumber(elm, to){
   const from = parseInt(elm.dataset.v || '0', 10);
   elm.dataset.v = to;
@@ -499,7 +525,6 @@ function animateNumber(elm, to){
   })(t0);
 }
 
-/* --- Acciones de la consola --- */
  $('#btn-toggle-status').addEventListener('click', () => {
   const q = currentQ();
   if (!q) return;
@@ -559,11 +584,6 @@ function animateNumber(elm, to){
 /* ============================================================
    8 · LA TORMENTA DE PALABRAS
 ============================================================ */
-
-/**
- * Agrupa las respuestas por clave normalizada y calcula
- * frecuencia y porcentaje de cada una.
- */
 function computeWords(q){
   const groups = new Map();
   for (const r of q.responses){
@@ -583,18 +603,12 @@ function computeWords(q){
   return words;
 }
 
-/** Área de solape entre un rectángulo y otro. */
 function overlap(x, y, w, h, p){
   const ix = Math.max(0, Math.min(x + w, p.x + p.w) - Math.max(x, p.x));
   const iy = Math.max(0, Math.min(y + h, p.y + p.h) - Math.max(y, p.y));
   return ix * iy;
 }
 
-/**
- * Busca una posición sin colisiones usando una espiral áurea
- * desde el centro. Si no cabe en ninguna parte, devuelve la
- * posición aleatoria con el mínimo solape posible.
- */
 function findSpot(W, H, w, h, placed){
   const pad = 10, cx = W / 2, cy = H / 2;
   const golden = Math.PI * (3 - Math.sqrt(5));
@@ -713,7 +727,6 @@ class WordStorm{
 
 let storm = null;
 
-/* --- Tooltip al hacer clic en una palabra --- */
 let currentTipKey = null;
 
 function onStormWordClick(key, btnEl){
@@ -771,7 +784,7 @@ document.addEventListener('pointerdown', e => {
 });
 
 /* ============================================================
-   9 · RESULTADOS, CSV E IMPRESIÓN
+   9 · RESULTADOS, GRÁFICOS, CSV E IMPRESIÓN
 ============================================================ */
 function renderResults(s, q){
   $('#res-q-tag').textContent = '· ' + (s.current + 1) + '/' + questions.length;
@@ -785,6 +798,12 @@ function renderResults(s, q){
 
   $('#sort-freq').classList.toggle('active', liveState.sort === 'freq');
   $('#sort-alpha').classList.toggle('active', liveState.sort === 'alpha');
+
+  // Selector de gráfico
+  $('#chart-bars').classList.toggle('active', liveState.chart === 'bars');
+  $('#chart-dots').classList.toggle('active', liveState.chart === 'dots');
+  $('#chart-donut').classList.toggle('active', liveState.chart === 'donut');
+  renderChartInto(words, q.responses.length);
 
   const body = $('#res-body');
   body.textContent = '';
@@ -833,6 +852,110 @@ function renderResults(s, q){
   });
 }
 
+/* --- Selector de tipo de gráfico --- */
+[['#chart-bars','bars'], ['#chart-dots','dots'], ['#chart-donut','donut']].forEach(([sel, mode]) => {
+  $(sel).addEventListener('click', () => { liveState.chart = mode; renderLive(); });
+});
+
+function renderChartInto(words, total){
+  const area = $('#chart-area');
+  area.textContent = '';
+
+  if (!words.length){
+    area.append(el('p', 'chart-note', 'Los gráficos aparecerán aquí en cuanto lleguen respuestas.'));
+    return;
+  }
+  if (liveState.chart === 'bars')  chartBars(area, words);
+  if (liveState.chart === 'dots')  chartDots(area, words);
+  if (liveState.chart === 'donut') chartDonut(area, words, total);
+}
+
+/** GRÁFICO DE BARRAS · top 12 respuestas */
+function chartBars(area, words){
+  const max = words[0].count;
+  words.slice(0, 12).forEach(w => {
+    const row = el('div', 'cbar');
+    row.append(el('span', 'cbar-label', w.text));
+    const track = el('div', 'cbar-track');
+    const fill = el('div', 'cbar-fill');
+    fill.style.background = colorOf(w.key);
+    track.append(fill);
+    row.append(track, el('span', 'cbar-val', w.count + ' · ' + pctStr(w.pct)));
+    area.append(row);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.width = Math.max(2, w.count / max * 100) + '%';
+    }));
+  });
+  if (words.length > 12){
+    area.append(el('p', 'chart-note', '+' + (words.length - 12) + ' respuestas más (ver tabla).'));
+  }
+}
+
+/** GRÁFICO DE PUNTOS · cada punto = una respuesta de un alumno */
+function chartDots(area, words){
+  area.append(el('p', 'chart-note', 'Cada punto es una respuesta.'));
+  words.slice(0, 10).forEach(w => {
+    const box = el('div', 'cdot');
+    const head = el('div', 'cdot-head');
+    head.append(el('b', '', w.text), el('span', '', String(w.count)));
+    const dots = el('div', 'cdot-dots');
+    const shown = Math.min(w.count, 60);
+    for (let i = 0; i < shown; i++){
+      const d = el('i');
+      d.style.background = colorOf(w.key);
+      dots.append(d);
+    }
+    box.append(head, dots);
+    if (w.count > 60) box.append(el('p', 'chart-note', '+ ' + (w.count - 60) + ' puntos más'));
+    area.append(box);
+  });
+  if (words.length > 10){
+    area.append(el('p', 'chart-note', '+' + (words.length - 10) + ' respuestas más (ver tabla).'));
+  }
+}
+
+/** GRÁFICO DE PASTEL (DONUT) · top 8 + "otras" */
+function chartDonut(area, words, total){
+  const wrap = el('div', 'cdonut');
+  const space = el('div', 'dspace');
+  const svg = svgEl('svg', { viewBox:'0 0 170 170', width:170, height:170 });
+  const g = svgEl('g', { transform:'rotate(-90 85 85)' });
+  svg.append(g);
+
+  const R = 64, C = 2 * Math.PI * R;
+  const otros = words.slice(8).reduce((s, w) => s + w.count, 0);
+  const segs = words.slice(0, 8).map(w => ({ label: w.text, count: w.count, color: colorOf(w.key) }));
+  if (otros) segs.push({ label: 'Otras respuestas', count: otros, color: '#C9C2B2' });
+
+  let acc = 0;
+  segs.forEach(s => {
+    const frac = s.count / total;
+    g.append(svgEl('circle', {
+      cx:85, cy:85, r:R, fill:'none',
+      stroke:s.color, 'stroke-width':30,
+      'stroke-dasharray': (frac * C) + ' ' + C,
+      'stroke-dashoffset': -acc
+    }));
+    acc += frac * C;
+  });
+
+  const center = el('div', 'dcenter');
+  center.append(el('b', '', String(total)), el('span', '', 'respuestas'));
+  space.append(svg, center);
+
+  const legend = el('div', 'dlegend');
+  segs.forEach(s => {
+    const item = el('div', 'dlegend-item');
+    const dot = el('span', 'res-dot');
+    dot.style.background = s.color;
+    item.append(dot, el('span', '', s.label), el('b', '', s.count + ' · ' + pctStr(s.count / total * 100)));
+    legend.append(item);
+  });
+
+  wrap.append(space, legend);
+  area.append(wrap);
+}
+
 /* --- Eliminar respuesta desde la tabla (dos pasos) --- */
  $('#res-body').addEventListener('click', e => {
   const btn = e.target.closest('.res-del');
@@ -852,7 +975,7 @@ function renderResults(s, q){
   }
 });
 
-/* --- Exportación CSV (Pregunta · Respuesta · Frecuencia · Porcentaje) --- */
+/* --- Exportación CSV --- */
 const csvEscape = v => '"' + String(v).replace(/"/g, '""') + '"';
 
  $('#btn-export').addEventListener('click', () => {
@@ -875,7 +998,7 @@ const csvEscape = v => '"' + String(v).replace(/"/g, '""') + '"';
   toast('CSV descargado');
 });
 
-/* --- Impresión / PDF con todas las preguntas --- */
+/* --- Impresión / PDF (incluye distribución con puntos ●) --- */
  $('#btn-print').addEventListener('click', () => {
   if (!session) return;
   buildPrintArea(sessionView());
@@ -892,13 +1015,15 @@ function buildPrintArea(s){
     const words = computeWords(q);
     const people = new Set(q.responses.map(r => r.authorId)).size;
     html += '<h2 class="pa-q">' + (i + 1) + '. ' + escHTML(q.text) + '</h2>'
-      + '<p class="pa-sum">' + people + ' participantes · ' + q.responses.length + ' respuestas</p>';
+      + '<p class="pa-sum">' + people + ' participantes · ' + q.responses.length + ' respuestas · cada ● = 1 respuesta</p>';
     if (words.length){
       html += '<table class="pa-table"><thead><tr><th>#</th><th>Respuesta</th>'
-        + '<th style="text-align:right">Frecuencia</th><th style="text-align:right">Porcentaje</th></tr></thead><tbody>';
+        + '<th style="text-align:right">Frecuencia</th><th style="text-align:right">Porcentaje</th><th>Distribución</th></tr></thead><tbody>';
       words.forEach((w, j) => {
+        const dots = '●'.repeat(Math.min(w.count, 30)) + (w.count > 30 ? '…' : '');
         html += '<tr><td>' + (j + 1) + '</td><td>' + escHTML(w.text) + '</td><td style="text-align:right">'
-          + w.count + '</td><td style="text-align:right">' + pctStr(w.pct) + '</td></tr>';
+          + w.count + '</td><td style="text-align:right">' + pctStr(w.pct) + '</td>'
+          + '<td class="pa-dots">' + dots + '</td></tr>';
       });
       html += '</tbody></table>';
     } else {
@@ -926,7 +1051,6 @@ function showJoinError(msg){
   err.hidden = false;
 }
 
-/** Valida un código contra Firebase y continúa el acceso. */
 async function tryJoinCode(raw){
   if (!FIREBASE_OK){ showJoinError('La app aún no está configurada (falta Firebase).'); return; }
   const m = String(raw || '').toUpperCase().replace(/\s+/g, '').match(/^([A-Z]{3})-?(\d{3})$/);
@@ -956,13 +1080,12 @@ async function tryJoinCode(raw){
  $('#join-form').addEventListener('submit', e => {
   e.preventDefault();
   if ($('#join-step2').hidden){
-    tryJoinCode($('#join-code').value);                        // Paso 1 · validar el código
+    tryJoinCode($('#join-code').value);
   } else {
-    finishJoin(sanitizeName($('#join-name').value) || null);   // Paso 2 · nombre opcional
+    finishJoin(sanitizeName($('#join-name').value) || null);
   }
 });
 
-/** Si la URL trae #ABC-123 (enlace del QR), precarga y valida el código. */
 function autoJoinFromURL(){
   const m = location.hash.match(/^#([A-Za-z]{3})-?(\d{3})$/);
   if (!m) return false;
@@ -978,7 +1101,6 @@ function finishJoin(name){
   sessionStorage.setItem(S_KEY, JSON.stringify(student));
   lastStudentSig = null;
   justSent = null;
-  // Si aún no estamos escuchando esa sesión, empezamos ahora
   if (sessionStatus === 'idle' || sessionStatus === 'missing' || (session && session.code !== joinCode)){
     watchSession(joinCode);
   }
@@ -1018,14 +1140,9 @@ function appendMyWords(z, mine){
   z.append(wrap);
 }
 
-/**
- * Renderizado selectivo del panel del alumno: solo reconstruye
- * cuando cambia la pregunta, su estado o sus respuestas.
- */
 function renderStudent(){
   if (!student) return;
 
-  // Mientras Firebase responde...
   if (sessionStatus === 'missing' || (session && session.code !== student.code)){
     lastStudentSig = null;
     const z = $('#student-zone');
@@ -1092,7 +1209,6 @@ function renderStudent(){
     return;
   }
 
-  // Pregunta abierta
   if (showingSent){
     const box = el('div', 'sent-box');
     box.append(checkSVG());
@@ -1118,7 +1234,6 @@ function renderStudent(){
     return;
   }
 
-  // Formulario de respuesta
   z.append(el('p', 'q-text', q.text));
 
   const form = el('form', 'answer-form');
@@ -1162,6 +1277,13 @@ function submitStudentAnswer(raw){
   const key = text ? normalizeKey(text) : null;
   if (!text || !key){ toast('Esa respuesta no es válida', 'warn'); return; }
 
+  // Palabras bloqueadas por el profesor (coincidencia por substring normalizado)
+  const blocked = session.settings.blocked || [];
+  if (blocked.some(b => key.includes(b))){
+    toast('El profe ha bloqueado esa palabra en esta actividad', 'warn');
+    return;
+  }
+
   if (!session.settings.allowRepeated && mine.some(r => r.key === key)){
     toast('Ya enviaste esa misma palabra', 'warn');
     return;
@@ -1169,7 +1291,7 @@ function submitStudentAnswer(raw){
 
   lastSubmitTs = now;
   justSent = { text, until: now + 1900 };
-  renderStudent(); // confirmación inmediata
+  renderStudent();
 
   addResponse(session.code, q.id, {
     text, key,
@@ -1177,7 +1299,7 @@ function submitStudentAnswer(raw){
     authorName: student.name,
     ts: now
   }).then(() => {
-    setTimeout(renderStudent, 1950); // vuelve al formulario tras la confirmación
+    setTimeout(renderStudent, 1950);
   }).catch(err => {
     console.error(err);
     justSent = null;
@@ -1189,8 +1311,6 @@ function submitStudentAnswer(raw){
 
 /* ============================================================
    11 · LLUVIA DE DEMOSTRACIÓN
-   Simula respuestas que llegan por Firebase (se ven en todos
-   los dispositivos conectados a la sesión).
 ============================================================ */
 const DEMO_POOL = [
   'motivación','curiosidad','curiosidad','proyectos','práctica','práctica','ejemplos','compañeros',
@@ -1222,12 +1342,8 @@ let demoAuthors = null;
 });
 
 /* ============================================================
-   11bis · PAQUETE AULA: QR, PROYECTOR Y PNG
+   11bis · QR, PROYECTOR Y PNG
 ============================================================ */
-
-/* ---------- QR de acceso ---------- */
-
-/** URL de acceso a la sesión: esta misma página + #CÓDIGO. */
 function buildJoinURL(code){
   return location.href.split('#')[0].split('?')[0] + '#' + code;
 }
@@ -1269,8 +1385,6 @@ function closeQrOverlay(){ $('#qr-overlay').hidden = true; }
   }catch(e){ toast(buildJoinURL(session.code)); }
 });
 
-/* ---------- Modo proyector ---------- */
-
 function enterProjector(){
   if (!session) return;
   liveState.mode = 'storm';
@@ -1299,8 +1413,6 @@ document.addEventListener('keydown', e => {
   if (!$('#qr-overlay').hidden) closeQrOverlay();
   else if (document.body.classList.contains('projector')) exitProjector();
 });
-
-/* ---------- Exportar la nube como PNG ---------- */
 
 function wrapCanvasText(ctx, text, x, y, maxW, lh){
   let line = '';
@@ -1394,8 +1506,8 @@ function exportStormPNG(s, q, words){
 ============================================================ */
 (function init(){
   buildBackgroundWords();
+  renderHistory();
 
-  // ¿Era alumno? → reanudar (sirve al recargar la página)
   try{
     const raw = sessionStorage.getItem(S_KEY);
     if (raw && FIREBASE_OK){
@@ -1411,7 +1523,6 @@ function exportStormPNG(s, q, words){
     }
   }catch(e){}
 
-  // ¿Era profesor? → reanudar
   if (teacherCode && FIREBASE_OK){
     watchSession(teacherCode);
     showView('live');
@@ -1419,6 +1530,5 @@ function exportStormPNG(s, q, words){
     return;
   }
 
-  // Si la URL trae el código del QR (#ABC-123), entrar directamente
   if (!autoJoinFromURL()) showView('home');
 })();
