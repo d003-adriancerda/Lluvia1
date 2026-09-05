@@ -1,6 +1,6 @@
 /* ============================================================
    CHUBASCO · Tormenta de palabras para el aula
-   Hoja de estilos
+   Hoja de estilos (Fase 1: + historial, bloqueadas, gráficos)
    ============================================================ */
 
 :root{
@@ -107,6 +107,18 @@ body:not([data-view="home"]) #bg-words{ opacity:.28 }
 }
 .home-note strong{ color:var(--ink) }
 
+/* ---------- Historial de sesiones ---------- */
+.history-box{ margin-top:30px; text-align:left }
+.history-title{ font-family:var(--font-display); font-size:1.1rem; font-weight:600; margin-bottom:10px }
+.history-item{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  background:var(--paper-2); border:1.5px solid var(--line); border-radius:12px;
+  padding:9px 14px; margin-bottom:8px;
+}
+.history-item b{ font-weight:700; font-size:.95rem }
+.history-item .h-date{ font-size:.78rem; color:var(--ink-soft) }
+.history-item .h-actions{ margin-left:auto; display:flex; gap:6px }
+
 /* ---------- Paneles (configuración, join) ---------- */
 .view-setup{ padding:20px }
 .panel{
@@ -125,16 +137,19 @@ input[type=text],input[type=number],textarea{
   padding:12px 14px; transition:border-color .15s, box-shadow .15s;
 }
 input:focus,textarea:focus{ outline:none; border-color:var(--coral); box-shadow:3px 3px 0 rgba(255,93,58,.3) }
-textarea{ resize:vertical; min-height:110px; line-height:1.55 }
+textarea{ resize:vertical; min-height:44px; line-height:1.55 }
+#setup-questions{ min-height:110px }
 .field-hint{ font-size:.82rem; color:var(--ink-soft); margin-top:6px }
 .rule-row{
   display:flex; align-items:center; justify-content:space-between; gap:16px;
   padding:13px 0; border-bottom:1px dashed var(--line);
 }
-.rule-row:last-of-type{ border-bottom:none }
 .rule-row label[for=setup-max]{ font-weight:500 }
 .rule-row input[type=number]{ width:86px; text-align:center; font-weight:700 }
 .switch-label{ font-weight:500; cursor:pointer }
+.rule-block{ padding:13px 0 0 }
+.rule-block label{ display:block; font-weight:500; margin-bottom:6px }
+.rule-block label small{ font-weight:400; color:var(--ink-soft) }
 
 /* Interruptor */
 .switch{ position:relative; display:inline-block; width:48px; height:27px; flex:none; cursor:pointer }
@@ -284,6 +299,43 @@ textarea{ resize:vertical; min-height:110px; line-height:1.55 }
 .res-del.armed{ background:var(--raspberry); color:#fff }
 .res-empty{ padding:30px; text-align:center; color:var(--ink-soft) }
 
+/* ---------- Gráficos estadísticos ---------- */
+.charts-row{ padding:12px 18px 0 }
+.chart-area{ padding:12px 18px 6px; min-height:40px }
+.chart-note{ font-size:.8rem; color:var(--ink-soft); margin:4px 0 8px }
+
+/* Barras */
+.cbar{
+  display:grid; grid-template-columns:minmax(90px,170px) 1fr 74px; gap:10px;
+  align-items:center; margin-bottom:9px; font-size:.92rem;
+}
+.cbar-label{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.cbar-track{ background:rgba(35,32,26,.07); border-radius:99px; height:20px; overflow:hidden }
+.cbar-fill{ height:100%; border-radius:99px; width:0; transition:width .6s cubic-bezier(.22,.9,.3,1) }
+.cbar-val{ font-variant-numeric:tabular-nums; text-align:right; color:var(--ink-soft); font-size:.82rem }
+
+/* Puntos (cada punto = una respuesta) */
+.cdot{ margin-bottom:12px }
+.cdot-head{ display:flex; justify-content:space-between; gap:10px; font-size:.9rem; margin-bottom:4px }
+.cdot-head b{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.cdot-head span{ color:var(--ink-soft); font-variant-numeric:tabular-nums; flex:none }
+.cdot-dots{ display:flex; flex-wrap:wrap; gap:4px }
+.cdot-dots i{ width:11px; height:11px; border-radius:50%; display:block }
+
+/* Pastel (donut SVG) */
+.cdonut{ display:flex; align-items:center; gap:24px; flex-wrap:wrap; padding:6px 0 }
+.cdonut .dspace{ position:relative; flex:none }
+.cdonut svg{ display:block }
+.cdonut .dcenter{
+  position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center; pointer-events:none;
+}
+.cdonut .dcenter b{ font-family:var(--font-display); font-size:1.7rem; line-height:1 }
+.cdonut .dcenter span{ font-size:.66rem; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-soft) }
+.dlegend{ display:flex; flex-direction:column; gap:6px; min-width:210px; flex:1 }
+.dlegend-item{ display:flex; align-items:center; gap:8px; font-size:.88rem }
+.dlegend-item b{ margin-left:auto; font-variant-numeric:tabular-nums; color:var(--ink-soft); font-weight:500 }
+
 /* ---------- Consola de control ---------- */
 .console{
   display:flex; align-items:center; gap:8px; flex-wrap:wrap;
@@ -379,6 +431,7 @@ textarea{ resize:vertical; min-height:110px; line-height:1.55 }
   .pa-table th,.pa-table td{ text-align:left; border-bottom:1px solid #bbb; padding:4pt 6pt }
   .pa-table th.num,.pa-table td.num{ text-align:right }
   .pa-table tr{ page-break-inside:avoid }
+  .pa-dots{ letter-spacing:2px; color:#444; font-size:9pt }
 }
 
 /* ---------- Responsive ---------- */
@@ -389,13 +442,12 @@ textarea{ resize:vertical; min-height:110px; line-height:1.55 }
   .console .btn-sm{ font-size:.82rem; padding:7px 10px }
   .bar-cell{ width:16% }
   .home-hero h1{ font-size:clamp(2.3rem,11vw,3.2rem) }
+  .cbar{ grid-template-columns:minmax(70px,110px) 1fr 60px }
 }
 
 /* ============================================================
    PAQUETE AULA · QR + Proyector
 ============================================================ */
-
-/* ---------- Overlay QR ---------- */
 #qr-overlay{
   position:fixed; inset:0; z-index:70; display:flex; align-items:center; justify-content:center;
   background:rgba(35,32,26,.45); backdrop-filter:blur(3px); padding:20px;
